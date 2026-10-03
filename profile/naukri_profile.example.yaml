@@ -1,0 +1,54 @@
+# Content pushed to your Naukri profile by `python -m naukri_bot profile <sections>`.
+# Copy to profile/naukri_profile.yaml (gitignored) and edit.
+# Limits enforced by Naukri: headline <= 250 chars, summary <= 1000, key_skills <= 20 (taxonomy names only,
+# input box 25 chars: use "Label <- query" when the label is longer), it_skills <= 10 rows, version <= 10 chars,
+# job titles may not contain "/", preferred roles <= 3.
+
+headline: >-
+  AI Engineer | 2 yrs | Python, FastAPI, LLM applications, RAG (LangChain, FAISS) | B.Tech CS
+
+summary: >-
+  AI Engineer with 2 years of experience building LLM features and production Python services.
+  Shipped a RAG assistant over 1,000+ documents at 85% retrieval accuracy and cut API latency by 60%
+  with Redis caching. Stack: Python, FastAPI, PyTorch, LangChain, PostgreSQL, Docker.
+
+key_skills:
+  - Python
+  - Machine Learning
+  - Generative AI
+  - Natural Language Processing <- NLP
+  - FastAPI
+
+employment:
+  - organisation: Example Tech        # must match the entry already on Naukri (used to find it)
+    designation: AI Engineer
+    description: >-
+      Built a RAG assistant over internal documents; moved hot endpoints to Redis caching.
+
+projects:
+  - title: Search Engine
+    match: Search Engine              # substring used to find an existing project to update
+    client: Personal project
+    link_to: Example Tech             # employment/education entry the project is tagged to
+    start: [Jan, 2025]
+    end: [Mar, 2025]
+    details: Inverted index and BM25 ranking over 3,000 documents in pure Python.
+
+resume_file: output/resumes/Rohan_Mehta_Resume.pdf
+
+it_skills:
+  - {name: Python, version: "3.12", last_used: 2026, years: 2, months: 0}
+
+online_profiles:
+  - {name: GitHub, url: "https://github.com/your-handle", description: Code for the projects above}
+
+work_samples:
+  - {title: Search Engine, url: "https://github.com/your-handle/search", start: [Jan, 2025], end: [Mar, 2025], description: BM25 search engine}
+
+career_profile:
+  industry: IT Services & Consulting
+  department: Data Science & Analytics
+  role_category: Data Science & Machine Learning
+  job_role: Machine Learning Engineer
+  preferred_roles_add: [Machine Learning Engineer, AI Engineer]
+  locations_add: [Bengaluru, Remote]

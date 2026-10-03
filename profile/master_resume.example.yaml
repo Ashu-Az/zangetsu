@@ -1,0 +1,27 @@
+# Master resume used for portal uploads. Copy to profile/master_resume.yaml (gitignored).
+name: Rohan Mehta
+headline: AI Engineer · LLM applications, RAG systems, Python backend
+contact_line: Bengaluru, India · +91-XXXXXXXXXX · you@example.com · linkedin.com/in/your-handle · github.com/your-handle
+summary: >-
+  AI Engineer with 2 years of experience building LLM features, retrieval pipelines and production
+  Python services. Shipped a RAG assistant over 1,000+ internal documents and cut API latency by 60%.
+skills:
+  - {name: Languages, items: [Python, TypeScript, SQL]}
+  - {name: LLM engineering, items: [OpenAI API, LangChain, RAG, FAISS, LLM-as-judge evaluation]}
+  - {name: Backend, items: [FastAPI, Django, PostgreSQL, Redis, Docker]}
+experience:
+  - title: AI Engineer
+    company: Example Tech Pvt Ltd
+    location: Bengaluru
+    dates: Jan 2025 – Present
+    bullets:
+      - Built a RAG assistant over 1,000+ PDFs; retrieval accuracy 85%, answer latency 30 s to 2 s.
+      - Moved hot endpoints to Redis-backed caching, p95 latency 400 ms to 150 ms.
+projects:
+  - {name: Search Engine, description: "Inverted index and BM25 ranking over 3,000 documents in pure Python.", link: "https://github.com/your-handle/search"}
+education:
+  - {degree: B.Tech Computer Science, school: Example University, dates: 2020 – 2024, details: ""}
+certifications: []
+keywords_used: []
+fit_score: 0
+fit_notes: ""

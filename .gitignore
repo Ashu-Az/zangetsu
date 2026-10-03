@@ -1,0 +1,23 @@
+# Secrets and sessions
+.env
+state/
+
+# Personal data (copy the *.example.* files to create your own)
+profile/profile.yaml
+profile/resume.md
+profile/master_resume.yaml
+profile/naukri_profile.yaml
+/*.pdf
+tools/linkedin_update.py
+
+# Run output: applications, answers, tailored resumes, logs
+output/
+
+# Not part of this project
+assignments/
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/

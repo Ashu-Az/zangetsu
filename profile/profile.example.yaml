@@ -1,0 +1,70 @@
+# Copy to profile/profile.yaml and fill in. Every value here is a FACT the bot may
+# use verbatim when answering recruiter questions. Leave a field blank if unknown;
+# the bot will then skip questions it cannot answer truthfully.
+name: Rohan Mehta
+email: you@example.com
+phone: "+91-XXXXXXXXXX"
+location: Bengaluru
+links:
+  linkedin: https://www.linkedin.com/in/your-handle
+  github: https://github.com/your-handle
+  portfolio: ""
+
+current_title: Data Scientist
+current_company: ""
+total_experience_years: 2
+relevant_experience_years: 2
+current_ctc_lpa: 12          # lakhs per annum
+expected_ctc_lpa: 18
+notice_period_days: 30
+serving_notice: false
+last_working_day: ""         # YYYY-MM-DD if serving notice
+willing_to_relocate: true
+preferred_locations: [Bengaluru, Hyderabad, Pune, Remote]
+work_mode: [Hybrid, Remote, Onsite]   # in order of preference
+highest_education: B.Tech in Computer Science
+graduation_year: 2022
+languages: [English, Hindi]
+
+# Skills you can defend in an interview. Used for yes/no "do you know X" questions.
+skills_primary: [Python, PyTorch, scikit-learn, SQL, pandas, LLMs, RAG, Transformers, FastAPI, Docker]
+skills_secondary: [TensorFlow, Spark, AWS, Airflow, LangChain]
+
+# A job title must contain at least one of these (case-insensitive) to be considered.
+# Leave the list empty to accept every title the search returns.
+include_title_keywords:
+  - software engineer
+  - software developer
+  - sde
+  - full stack
+  - fullstack
+  - full-stack
+  - backend
+  - frontend
+  - data scientist
+  - data science
+  - ai engineer
+  - ai/ml
+  - machine learning
+  - ml engineer
+  - deep learning
+  - genai
+  - generative ai
+  - llm
+  - nlp
+  - computer vision
+
+# Job titles / words that mean "do not apply" (case-insensitive substring match on the title)
+exclude_title_keywords: [intern, fresher, sales, bpo, telecaller, manager, lead, architect, head, director, principal]
+
+# Anything else recruiters commonly ask (free text, one fact per line)
+extra_facts:
+  - Comfortable with rotational shifts: no
+  - Open to contract roles: yes, if 6+ months
+  - Passport: valid
+
+# Master resume filename built by profile/build_master_resume.py into output/resumes/
+resume_file: Rohan_Mehta_Resume.pdf
+# Optional Wellfound apply note; {title} and {company} are filled in per job.
+# cover_note: >-
+#   Hi, I'm applying for the {title} role at {company}. ...

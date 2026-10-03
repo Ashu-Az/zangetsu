@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>{{ r.name }} – Resume</title>
+<style>
+  @page { size: A4; margin: 14mm 15mm; }
+  * { box-sizing: border-box; }
+  body { font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; color: #1a1a1a; font-size: 10.5pt; line-height: 1.38; margin: 0; }
+  h1 { font-size: 20pt; margin: 0; letter-spacing: 0.2px; }
+  .headline { font-size: 11.5pt; color: #333; margin: 2px 0 4px; font-weight: 600; }
+  .contact { font-size: 9.5pt; color: #444; margin-bottom: 10px; }
+  h2 { font-size: 10.5pt; text-transform: uppercase; letter-spacing: 1.1px; color: #222; border-bottom: 1.2px solid #222; padding-bottom: 2px; margin: 12px 0 6px; }
+  p { margin: 0 0 4px; }
+  ul { margin: 2px 0 6px 16px; padding: 0; }
+  li { margin: 0 0 2px; }
+  .role { display: flex; justify-content: space-between; font-weight: 600; margin-top: 6px; }
+  .role .dates { font-weight: 400; color: #555; white-space: nowrap; }
+  .sub { color: #444; font-style: italic; margin-bottom: 2px; }
+  .skills td { vertical-align: top; padding: 1px 6px 1px 0; }
+  .skills td.k { font-weight: 600; white-space: nowrap; }
+  a { color: #1a1a1a; text-decoration: none; }
+  .proj b { font-weight: 600; }
+</style>
+</head>
+<body>
+  <h1>{{ r.name }}</h1>
+  <div class="headline">{{ r.headline }}</div>
+  <div class="contact">{{ r.contact_line }}</div>
+
+  <h2>Summary</h2>
+  <p>{{ r.summary }}</p>
+
+  {% if r.skills %}
+  <h2>Skills</h2>
+  <table class="skills">
+    {% for g in r.skills %}<tr><td class="k">{{ g.name }}</td><td>{{ g.items | join(", ") }}</td></tr>{% endfor %}
+  </table>
+  {% endif %}
+
+  {% if r.experience %}
+  <h2>Experience</h2>
+  {% for e in r.experience %}
+    <div class="role"><span>{{ e.title }} — {{ e.company }}{% if e.location %}, {{ e.location }}{% endif %}</span><span class="dates">{{ e.dates }}</span></div>
+    <ul>{% for b in e.bullets %}<li>{{ b }}</li>{% endfor %}</ul>
+  {% endfor %}
+  {% endif %}
+
+  {% if r.projects %}
+  <h2>Projects</h2>
+  <ul>
+    {% for p in r.projects %}<li class="proj"><b>{{ p.name }}</b> — {{ p.description }}{% if p.link %} <a href="{{ p.link }}">{{ p.link | replace("https://", "") }}</a>{% endif %}</li>{% endfor %}
+  </ul>
+  {% endif %}
+
+  {% if r.education %}
+  <h2>Education</h2>
+  {% for ed in r.education %}
+    <div class="role"><span>{{ ed.degree }} — {{ ed.institution }}</span><span class="dates">{{ ed.dates }}</span></div>
+    {% if ed.details %}<div class="sub">{{ ed.details }}</div>{% endif %}
+  {% endfor %}
+  {% endif %}
+
+  {% if r.certifications %}
+  <h2>Certifications</h2>
+  <ul>{% for c in r.certifications %}<li>{{ c }}</li>{% endfor %}</ul>
+  {% endif %}
+</body>
+</html>
