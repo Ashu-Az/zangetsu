@@ -11,6 +11,7 @@ from urllib.parse import quote_plus
 
 from ..models import ApplyMode, JobCard, JobPosting
 from ..ranking import parse_age_days
+from ..rules import with_unit
 from .base import ApplyResult, Portal
 
 log = logging.getLogger(__name__)
@@ -102,8 +103,22 @@ class LinkedInPortal(Portal):
             q = (el.get_attribute("aria-label") or "").strip()
             if q:
                 groups.setdefault(q, []).append(el)
+        # Newer Easy Apply layout: radios have aria-labelledby (no aria-label) inside role=radiogroup, the question
+        # is the paragraph above the group and each option's own text is its last line ("Yes" / "No").
+        for grp in dlg.locator("[role='radiogroup']").all():
+            radios = [e for e in grp.locator("[role='radio']").all()]
+            if not radios or any((e.get_attribute("aria-label") or "").strip() for e in radios):
+                continue
+            q = grp.evaluate("""g => { let p = g.previousElementSibling; while (p && !p.innerText.trim()) p = p.previousElementSibling;
+                                     const lg = g.querySelector('legend');
+                                     return ((p && p.innerText) || (lg && lg.innerText) || g.getAttribute('aria-label') || '').trim(); }""")
+            q = " ".join(q.replace("*", " ").split())
+            if not q:
+                continue
+            groups[q] = radios
         for q, els in groups.items():
-            opts = [e.inner_text().strip().split("\n")[0] for e in els]
+            opts = [e.inner_text().strip().split("\n")[-1].strip() if not (e.get_attribute("aria-label") or "").strip()
+                    else e.inner_text().strip().split("\n")[0] for e in els]
             if any(e.get_attribute("aria-checked") == "true" for e in els):
                 continue
             ans = answerer(q, opts, "radio")
@@ -161,8 +176,11 @@ class LinkedInPortal(Portal):
             text = ans.answer_text if ans and ans.answer_text else None
             if text is None and re.search(r"how many years|years of (work )?experience", q, re.I):
                 text = str(self.profile.get("default_skill_years", 1))
-            # numeric-looking fields (notice period, years, days, CTC) must be digits only
-            if text and re.search(r"how many|years|days|notice|number of|ctc|salary|lpa|lakh", ql) and re.search(r"\d", text):
+            is_textarea = inp.evaluate("e => e.tagName") == "TEXTAREA"
+            if text and is_textarea:
+                text = with_unit(q, text)      # free text: "7.5 LPA", "15 days"
+            # numeric-looking single-line fields (notice period, years, days, CTC) must be digits only
+            elif text and re.search(r"how many|years|days|notice|number of|ctc|salary|lpa|lakh", ql) and re.search(r"\d", text):
                 text = re.search(r"\d+(?:\.\d+)?", text).group(0)
             if text is None:
                 result.notes = f"unanswered: {q[:80]}"; ok = False; continue
@@ -243,7 +261,14 @@ class LinkedInPortal(Portal):
             nxt = dlg.locator("button[aria-label='Continue to next step'], button:has-text('Next'), button[aria-label='Review your application'], button:has-text('Review')").first
             if not nxt.count():
                 self._dismiss(); return ApplyResult("failed", "no next/submit button", result.questions)
+            before = re.sub(r"\s+", " ", text)[:1500]
             nxt.click(); time.sleep(random.uniform(2.5, 3.5))
+            if self._modal().count() and re.sub(r"\s+", " ", self._modal().inner_text())[:1500] == before:
+                # Next did nothing: a required field we did not recognise. Say which, instead of looping.
+                q = self._modal().evaluate("""d => { const e = d.querySelector('[class*=error], [role=alert], [aria-invalid=true]');
+                    const box = e && (e.closest('fieldset') || e.closest('div'));
+                    return ((box && box.innerText) || d.innerText).trim().replace(/\\s+/g, ' ').slice(0, 140); }""")
+                self._dismiss(); return ApplyResult("deferred", f"stuck on page: {q}", result.questions)
             errs = self._modal().evaluate("el => Array.from(el.querySelectorAll('[class*=error], [role=alert]')).filter(e=>e.offsetParent!==null && e.innerText.trim()).map(e=>e.innerText.trim().slice(0,60))") if self._modal().count() else []
             if errs and step > 0 and "Additional Questions" in text:
                 # we already tried answering this page; a remaining error means a field we cannot fill

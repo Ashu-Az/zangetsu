@@ -8,6 +8,7 @@ import time
 from urllib.parse import quote_plus
 
 from ..models import ApplyMode, JobCard, JobPosting
+from ..rules import with_unit
 from .base import ApplyResult, Portal
 
 log = logging.getLogger(__name__)
@@ -106,6 +107,8 @@ class IndeedPortal(Portal):
             text = ans.answer_text if ans and ans.answer_text else (str(self.profile.get("default_skill_years", 1)) if re.search(r"years|experience", q, re.I) else None)
             if text is None:
                 res.notes = f"unanswered: {q[:80]}"; ok = False; continue
+            if inp.evaluate("e => e.tagName") == "TEXTAREA":
+                text = with_unit(q, text)
             inp.click(); ap.keyboard.type(text, delay=random.randint(40, 90)); time.sleep(0.3)
             res.questions.append({"question": q, "kind": "text", "options": [], "answer": text, "source": "rules" if ans else "default"})
         return ok
@@ -139,7 +142,12 @@ class IndeedPortal(Portal):
                     pass
                 submit.click(); time.sleep(random.uniform(5, 7))
                 body = ap.inner_text("body")
-                res.status = "applied" if re.search(r"application (has been )?submitted|Your application was sent|applied successfully|Application submitted", body, re.I) else "applied_partial"
+                still_open = ap.locator("button:has-text('Submit your application')").count() and \
+                    ap.locator("button:has-text('Submit your application')").first.is_visible()
+                confirmed = (re.search(r"application (has been )?submitted|Your application was sent|applied successfully|"
+                                       r"Application submitted|you.ve applied|applied to", body, re.I)
+                             or "post-apply" in ap.url or not still_open)
+                res.status = "applied" if confirmed else "applied_partial"
                 res.notes = "submitted"; break
             if re.search(r"resume", body, re.I) and ap.locator("input[type='radio']").count() and not ap.locator("select, textarea").count():
                 # resume choice page: prefer the Indeed/profile resume option if nothing is selected
@@ -148,10 +156,15 @@ class IndeedPortal(Portal):
                     radios[0].evaluate("e => e.click()")
             elif not self._fill_page(ap, answerer, res):
                 self._bail(ap); return ApplyResult("deferred", res.notes, res.questions)
-            cont = ap.locator("button:has-text('Continue'), button:has-text('Next'), button:has-text('Review your application')").first
-            if not cont.count():
-                self._bail(ap); return ApplyResult("failed", "no continue button", res.questions)
-            cont.click(); time.sleep(random.uniform(4, 6))
+            # Indeed renders one hidden "Continue" per resume card; only one is visible. Never click a hidden one.
+            conts = [c for c in ap.locator("button:has-text('Continue'), button:has-text('Next'), "
+                                           "button:has-text('Review your application'), button:has-text('Apply anyway')").all()
+                     if c.is_visible() and c.is_enabled()]
+            if not conts:
+                self._bail(ap); return ApplyResult("failed", "no visible continue button", res.questions)
+            # "It looks like you don't meet these employer requirements": Indeed offers "Apply anyway".
+            anyway = [c for c in conts if "apply anyway" in c.inner_text().lower()]
+            (anyway or conts)[0].click(); time.sleep(random.uniform(4, 6))
             errs = ap.evaluate("() => Array.from(document.querySelectorAll('[class*=error], [role=alert]')).filter(e=>e.offsetParent!==null && e.innerText.trim()).map(e=>e.innerText.trim().slice(0,60)).slice(0,4)")
             if errs and step >= 1:
                 self._bail(ap); return ApplyResult("deferred", "validation: " + "; ".join(errs[:2]), res.questions)

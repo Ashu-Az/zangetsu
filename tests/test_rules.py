@@ -70,8 +70,8 @@ def test_work_mode_interview_history_and_availability():
     assert t("Are you ready work in Hybrid(Pune) mode?") == "Yes"
     assert r("Are you comfortable with night shifts?", ["Yes", "No"]) == ("No", [1])
     assert t("Have you ever appeared for an Interview at any Exl location during the last 6 months?") == "No"
-    assert t("Are you available to start immediately?") == "Yes"
-    assert r("Are you available to start immediately?", ["Yes", "No"]) == ("Yes", [0])
+    assert t("Are you available to start immediately?") == "I can join within 15 days (notice period)."
+    assert r("Are you available to start immediately?", ["Yes", "No"]) == ("No", [1])   # 15-day notice is not immediate
     assert t("What is your earliest start date?").startswith("Within 15 days")
 
 
@@ -81,7 +81,7 @@ def test_numeric_text_answers_are_digits_only():
     assert t("What is your notice period (in days)?") == "15"
     assert t("Notice period") == "15"
     assert t("How many days do you need to join?") == "15"
-    assert t("Are you available to start immediately?") == "Yes"
+    assert t("Are you available to start immediately?") == "I can join within 15 days (notice period)."
 
 
 def test_links_lwd_office_and_canned():
@@ -95,3 +95,25 @@ def test_links_lwd_office_and_canned():
     assert r("Are you ready to work from Bengaluru, India office?", ["Yes", "No"]) == ("Yes", [0])
     assert t("Please describe your most recent project involving LLMs") == "S-SPPO reproduction"
     assert t("Why do you want to join us?") == "Because LLM systems"
+
+
+def test_live_indeed_questions_2026_10_04():
+    """Real smartapply questions that got numeric nonsense before (Indeed, 4 Oct 2026)."""
+    p = dict(P, assume_skill_experience=True, skill_years={"python": 3}, total_experience_years=2,
+             current_ctc_lpa=7.5, expected_ctc_lpa=14, notice_period_days=15)
+    a = lambda q: rule_answer(q, [], "text", p).answer_text
+    assert a("How many years of Python experience do you have?\xa0*") == "3"
+    assert a("What is your current CTC & Notice period?") == "Current CTC: 7.5 LPA; Notice period: 15 days"
+    assert a("Do you have hands-on experience with Azure Data Lake and Databricks? If yes, please briefly describe").startswith("Yes. ")
+    assert a("Must have exp in Python,AWS Cloud Services,LangChain") == "Yes."
+    assert a("Do you have 5-7 years of total experience?") == "I have 2 years of total professional experience."
+    assert a("What is your NP? Mention in days") == "15"
+    assert a("If you were referred by an employee, list their name") == "Not referred"
+
+
+def test_immediate_availability_is_honest_about_notice():
+    p = dict(P, notice_period_days=15)
+    assert rule_answer("Are you available to start immediately?", [], "text", p).answer_text == "I can join within 15 days (notice period)."
+    assert rule_answer("Are you available to start immediately?", ["Yes", "No"], "radio", p).selected_option_indices == [1]
+    assert rule_answer("Can you join within 30 days?", ["Yes", "No"], "radio", p).selected_option_indices == [0]
+    assert rule_answer("How soon can you join?", [], "text", p).answer_text == "Within 15 days"
