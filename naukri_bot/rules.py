@@ -87,6 +87,11 @@ def _answer(text: str, idx: int | None = None, options: list[str] | None = None)
 
 def rule_answer(question: str, options: list[str], kind: str, profile: dict) -> QuestionAnswer | None:
     q = " ".join(question.lower().split())
+    # Recruiter shorthand and typos seen in the wild: "What is your NP?", "overal year of exp", "YoE".
+    q = re.sub(r"\bnp\b", "notice period", q)
+    q = re.sub(r"\byoe\b", "years of experience", q)
+    q = re.sub(r"\bexp\b\.?", "experience", q)
+    q = re.sub(r"\boveral\b", "overall", q)
     has_opts = bool(options)
 
     def numeric(value: float | None, unit_hint: str = "") -> QuestionAnswer | None:
@@ -108,8 +113,21 @@ def rule_answer(question: str, options: list[str], kind: str, profile: dict) -> 
     for pat, text in (profile.get("canned_answers") or {}).items():
         if re.search(pat, q, re.I):
             return _answer(text) if not has_opts else None
-    # ---- notice period / last working day
-    if "notice" in q or "last working day" in q or "lwd" in q:
+    # ---- referral / former employee: the candidate was not referred and has not worked there
+    if re.search(r"referred by|referral|who referred|employee referral", q):
+        if has_opts:
+            i = _yes_no(options, False)
+            return _answer("", i, options) if i is not None else None
+        return _answer("Not referred")
+    if re.search(r"\bex[- ]?\w*\s+employee|former employee|previously (worked|employed)|worked (with|for|at) (us|this company|our company) (before|earlier|previously)", q):
+        if has_opts:
+            i = _yes_no(options, False)
+            return _answer("", i, options) if i is not None else None
+        return _answer("No")
+
+    # ---- notice period / last working day / time to start after an offer
+    if ("notice" in q or "last working day" in q or "lwd" in q
+            or re.search(r"(after|of) accepting (an |the )?offer|before (you can )?start(ing)? work", q)):
         days = _num(profile.get("notice_period_days"))
         if days is None:
             return None
