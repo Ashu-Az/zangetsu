@@ -36,6 +36,17 @@ class WellfoundPortal(Portal):
     profile_dir = "wellfound-profile"
     daily_cap = 30
 
+    @staticmethod
+    def _question_for(dlg, box) -> str:
+        """Question text for a screening textarea: its <label for=id>, else the nearest block's text."""
+        box_id = box.get_attribute("id") or ""
+        if box_id:
+            lab = dlg.locator(f"label[for='{box_id}']")
+            if lab.count():
+                return " ".join(lab.first.inner_text().split())
+        txt = box.evaluate("e => (e.closest('div:has(> label), fieldset, div') || e.parentElement).innerText || ''")
+        return " ".join(txt.split())[:300]
+
     def search_urls(self) -> list[str]:
         slugs = {ROLE_SLUGS.get(k.lower(), k.lower().replace(" ", "-")) for k in self.settings.keywords}
         return [f"https://wellfound.com/role/l/{s}/india" for s in sorted(slugs)]
@@ -117,11 +128,26 @@ class WellfoundPortal(Portal):
                     res.questions.append({"question": "I can relocate to the job location", "kind": "checkbox", "options": ["yes"], "answer": "yes", "source": "profile"})
             else:
                 pg.keyboard.press("Escape"); return ApplyResult("skipped", "job location not in preferences and not willing to relocate")
-        box = dlg.locator("textarea").first
-        if box.count():
-            note = cover_note(job, self.profile)
-            box.click(); pg.keyboard.insert_text(note); time.sleep(0.8)
-            res.questions.append({"question": "Application note", "kind": "text", "options": [], "answer": note[:120], "source": "template"})
+        # Text boxes are either the application note or employer screening questions
+        # ("customQuestionAnswers[...]"). Disabled boxes are never typed into.
+        note_done = False
+        for box in dlg.locator("textarea").all():
+            if not box.is_visible() or not box.is_enabled():
+                continue
+            name = box.get_attribute("name") or ""
+            if "customQuestion" in name:
+                q = self._question_for(dlg, box)
+                ans = answerer(q, [], "text") if q else None
+                if not ans or not (ans.answer_text or "").strip():
+                    pg.keyboard.press("Escape")
+                    return ApplyResult("deferred", f"unanswered: {q[:120]}", res.questions)
+                box.click(); pg.keyboard.insert_text(ans.answer_text); time.sleep(0.6)
+                res.questions.append({"question": q, "kind": "text", "options": [], "answer": ans.answer_text[:200], "source": "rules"})
+            elif not note_done:
+                note = cover_note(job, self.profile)
+                box.click(); pg.keyboard.insert_text(note); time.sleep(0.8)
+                res.questions.append({"question": "Application note", "kind": "text", "options": [], "answer": note[:120], "source": "template"})
+                note_done = True
         # any extra radio/select questions
         for sel in dlg.locator("select").all():
             opts = [o.strip() for o in sel.locator("option").all_inner_texts() if o.strip() and not o.strip().lower().startswith("select")]
