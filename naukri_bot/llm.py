@@ -166,7 +166,7 @@ class LLM:
         if options:
             parts.append("OPTIONS:\n" + "\n".join(f"[{i}] {o}" for i, o in enumerate(options)))
         user = "\n\n".join(parts)
-        return self._parse(self._answer_system, user, QuestionAnswer, effort="medium", max_tokens=2000)
+        return self._parse(self._answer_system, user, QuestionAnswer, effort="medium", max_tokens=8000)   # thinking counts toward max_tokens
 
     def tailor_resume(self, job: JobPosting) -> TailoredResume:
         user = "JOB POSTING:\n" + job.to_prompt_text() + "\n\nProduce the tailored resume now."

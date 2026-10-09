@@ -17,6 +17,20 @@ log = logging.getLogger(__name__)
 _env = Environment(loader=FileSystemLoader(str(TEMPLATE_DIR)), autoescape=select_autoescape(["html"]))
 
 
+def _metrics(text: str):
+    """Bold the numbers recruiters scan for (400 ms, 85%, 10,000+, 30 s), escaping everything else."""
+    from markupsafe import Markup, escape
+    # standalone figures only: never digits inside names (ADA-002, BM25, Qwen2.5), HTML entities or years
+    pat = r"(?<![A-Za-z0-9&#.\-])(\d[\d,.]*\+?(?:\s?(?:%|ms|s)\b|%)?)(?![A-Za-z0-9])"
+    def bold(m):
+        v = m.group(1)
+        return v if re.fullmatch(r"(19|20)\d\d", v) or re.fullmatch(r"\d", v) else f"<b>{v}</b>"
+    return Markup(re.sub(pat, bold, str(escape(text))))
+
+
+_env.filters["metrics"] = _metrics
+
+
 def safe_slug(text: str, max_len: int = 40) -> str:
     s = re.sub(r"[^A-Za-z0-9]+", "-", text).strip("-")
     return s[:max_len].rstrip("-") or "job"
@@ -118,7 +132,7 @@ def html_to_pdf(html: str, path: Path, playwright=None) -> None:
         page = browser.new_page()
         page.set_content(html, wait_until="load")
         page.pdf(path=str(path), format="A4", print_background=True,
-                 margin={"top": "14mm", "bottom": "14mm", "left": "15mm", "right": "15mm"})
+                 margin={"top": "10mm", "bottom": "10mm", "left": "12mm", "right": "12mm"})
         browser.close()
     finally:
         if own:

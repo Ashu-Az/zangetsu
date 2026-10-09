@@ -82,6 +82,10 @@ def parse_job_page(html: str, url: str) -> JobPosting:
 
     job.education = _text(soup, S.JD_EDUCATION, sep=" ").replace("Education", "", 1).strip()
     job.skills = sorted({a.get_text(" ", strip=True) for a in soup.select(S.JD_KEY_SKILLS) if a.get_text(strip=True)})
+    for item in soup.select(S.MATCH_ITEM):
+        label = item.get_text(" ", strip=True).lower()
+        if label:
+            job.match[label] = item.select_one(S.MATCH_OK_ICON) is not None
     about = soup.select_one(S.JD_ABOUT_COMPANY)
     if about:
         job.about_company = about.get_text(" ", strip=True)[:1500]
@@ -92,6 +96,10 @@ def scrape_job(browser, url: str) -> JobPosting:
     browser.goto(url)
     try:
         browser.page.wait_for_selector(S.JD_TITLE, timeout=15000)
+    except Exception:
+        pass
+    try:   # the match-score block renders after the header
+        browser.page.wait_for_selector(f"{S.MATCH_ITEM} i", timeout=5000)
     except Exception:
         pass
     return parse_job_page(browser.page.content(), browser.page.url)

@@ -35,17 +35,23 @@ JD_DETAILS = "[class*='styles_details'], [class*='other-details']"
 JD_EDUCATION = "[class*='education']"
 JD_KEY_SKILLS = "[class*='key-skill'] a, [class*='key-skill'] span"
 JD_ABOUT_COMPANY = "[class*='about-company']"
+# Naukri "Job match score" (verified 2026-10-05): Early Applicant / Keyskills / Location / Work Experience,
+# each with a check_circle (match) or crossMatchscore (no match) icon
+MATCH_ITEM = "div[class*='MS__details']"
+MATCH_OK_ICON = "i.ni-icon-check_circle"
 
 APPLY_BUTTON = "button#apply-button, button[class*='apply-button']:not([id*='company'])"
 COMPANY_SITE_BUTTON = "button#company-site-button, button[class*='company-site-button']"
 ALREADY_APPLIED = "#already-applied, [class*='already-applied'], button:has-text('Applied')"
 JOB_EXPIRED_TEXT = ["This job has expired", "job is no longer available", "Job not found"]
-DAILY_QUOTA_TEXT = ["daily quota", "quota has been expired", "limit reached"]
-APPLY_SUCCESS_TEXT = ["successfully applied", "Application sent", "You have applied", "applied successfully"]
+DAILY_QUOTA_TEXT = ["daily quota", "quota has been expired", "limit reached", "reached the daily limit", "reached your daily limit", "reached the maximum number of applications"]
+APPLY_SUCCESS_TEXT = ["successfully applied", "Application sent", "You have applied", "applied successfully",
+                      "Thank you for your responses", "Thank you for applying"]
 
 # --- questionnaire chatbot drawer (opens after clicking Apply on some jobs) ---
 DRAWER = "[id*='ChatbotContainer'], .chatbot_Drawer, [class*='chatbot_Drawer']"
 DRAWER_CLOSE = ".chatbot_Drawer [class*='crossIcon'], .chatbot_Drawer .close"
+USER_MESSAGES = ".chatbot_ListItem.userItem .msg, [class*='userMsg'] [class*='msg'], .chatbot_ListItem:not(.botItem) .msg"
 BOT_MESSAGES = ".chatbot_ListItem .botMsg .msg, .chatbot_ListItem.botItem .msg, [class*='botMsg'] [class*='msg']"
 USER_MESSAGES = ".chatbot_ListItem .userMsg .msg, .chatbot_ListItem.userItem .msg"
 RADIO_CONTAINER = ".singleselect-radiobutton-container, [class*='singleselect-radiobutton']"

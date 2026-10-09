@@ -79,6 +79,9 @@ class HiristPortal(Portal):
         if not btn.count():
             return ApplyResult("failed", "no Apply button")
         btn.click(); time.sleep(random.uniform(3, 5))
+        if pg.locator("text=Login here").count() and pg.locator("text=Get OTP").count():
+            pg.keyboard.press("Escape")
+            raise RuntimeError("Hirist is logged out: sign in (Continue with Google) in the hirist-profile browser, then rerun")
         res = ApplyResult("failed")
         for _ in range(6):
             dlg = self._dialog()

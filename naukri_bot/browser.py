@@ -81,12 +81,38 @@ class Browser:
         return False
 
     def is_logged_in(self) -> bool:
+        """True only on positive evidence (a logged-in header element). A missing login form is not
+        evidence: Akamai's 'Access Denied' page and half-rendered pages have no form either."""
         self.goto(MNJ_HOME, settle=(2, 3))
-        if "/mnjuser/" not in self.page.url:
+        if "access denied" in self.page.title().lower():
+            log.error("Naukri returned 'Access Denied' (bot protection).")
             return False
-        if self._login_form_shown():
+        if "/mnjuser/" not in self.page.url or self._login_form_shown():
             return False
-        return any(self.page.locator(m).count() for m in S.LOGGED_IN_MARKERS) or "login" not in self.page.title().lower()
+        return any(self.page.locator(m).count() for m in S.LOGGED_IN_MARKERS)
+
+    def save_debug(self, name: str) -> None:
+        """Screenshot + HTML of the current page into output/debug/, for fixing selectors offline."""
+        from .config import OUTPUT_DIR
+        d = OUTPUT_DIR / "debug"
+        d.mkdir(parents=True, exist_ok=True)
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in name)[:60]
+        try:
+            self.page.screenshot(path=str(d / f"{stamp}-{safe}.png"), full_page=True)
+            (d / f"{stamp}-{safe}.html").write_text(self.page.content(), encoding="utf-8")
+            log.info("  debug snapshot: output/debug/%s-%s.*", stamp, safe)
+        except Exception as e:
+            log.warning("  could not save debug snapshot: %s", e)
+
+    def _looks_logged_in_here(self) -> bool:
+        """Logged-in check on the current page, without navigating (navigating would wipe an OTP/captcha step)."""
+        try:
+            if self._login_form_shown():
+                return False
+            return any(self.page.locator(m).count() for m in S.LOGGED_IN_MARKERS)
+        except Exception:      # page mid-navigation
+            return False
 
     def ensure_logged_in(self) -> bool:
         if self.is_logged_in():
@@ -109,14 +135,17 @@ class Browser:
 
         deadline = time.time() + self.settings.login_wait_seconds
         log.info("Waiting up to %ss for login (OTP / captcha are fine)…", self.settings.login_wait_seconds)
+        # Only watch the page here. The OTP / captcha step hides the login form too, so a hidden
+        # form does not mean "logged in", and any navigation would destroy that step.
         while time.time() < deadline:
             time.sleep(3)
-            if not self._login_form_shown():
+            if self._looks_logged_in_here():
+                pause(2, 3)    # let the post-login redirect settle, then confirm once
                 if self.is_logged_in():
                     log.info("Login detected.")
                     return True
-                self.goto(LOGIN_URL)
         log.error("Login was not completed in time.")
+        self.save_debug("login-timeout")
         return False
 
     # ---- small conveniences ----

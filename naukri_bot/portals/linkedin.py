@@ -17,15 +17,31 @@ from .base import ApplyResult, Portal
 log = logging.getLogger(__name__)
 DEFAULT_RESUME = "resume.pdf"  # override with resume_file in profile.yaml
 
+def experience_from_text(text: str) -> str:
+    """'3-5 years of experience' -> '3 - 5 years'; '5+ years experience' -> '5+ years'; '' if not stated.
+    Only numbers near the word experience count, so 'founded 20 years ago' is ignored."""
+    for m in re.finditer(r"(\d{1,2})\s*(?:\+\s*)?(?:(?:-|–|to)\s*(\d{1,2})\s*)?\+?\s*(?:years|yrs)", text, re.I):
+        after = text[m.end(): m.end() + 40].lower()
+        before = text[max(0, m.start() - 25): m.start()].lower()
+        if after.lstrip().startswith("ago"):
+            continue
+        # "3-5 years of (relevant) experience" / "5+ yrs exp" / "Experience: 2-4 years"
+        if not (re.match(r"\W*(of\s+)?([a-z-]+\s+){0,3}(experience|exp)\b", after) or re.search(r"(experience|exp)\W{0,3}$", before)):
+            continue
+        return f"{m.group(1)} - {m.group(2)} years" if m.group(2) else f"{m.group(1)}+ years"
+    return ""
+
 
 class LinkedInPortal(Portal):
     name = "linkedin"
     profile_dir = "linkedin-profile"
     daily_cap = 25   # keep LinkedIn volume low; it restricts accounts that look scripted
+    max_views = 60   # job-page views per run; ~200/run plus post search triggered a search pause on 5 Oct 2026
 
     @property
     def resume_name(self) -> str:
-        return self.profile.get("resume_file") or DEFAULT_RESUME
+        """The role-focused variant chosen for the job being applied to (see resume_variants.py)."""
+        return getattr(self, "_variant_file", None) or self.profile.get("resume_file") or DEFAULT_RESUME
 
     # ---------- search ----------
     def search_urls(self) -> list[str]:
@@ -66,6 +82,10 @@ class LinkedInPortal(Portal):
         pg.goto(card.url, wait_until="domcontentloaded", timeout=60000)
         time.sleep(random.uniform(4, 6))
         main = pg.locator("main").first.inner_text() if pg.locator("main").count() else pg.inner_text("body")
+        if re.search(r"unusual (search )?traffic|activity on your account has been (paused|restricted)|account (is )?restricted", main, re.I):
+            from ..cooldown import pause
+            pause("linkedin", 48, "throttle/restriction notice on a job page")
+            raise RuntimeError("LinkedIn throttle/restriction notice")   # base engine stops after repeated scrape failures
         job = JobPosting(job_id=card.job_id, url=card.url, title=card.title, company=card.company, location=card.location, posted=card.posted)
         meta = re.search(r"([^\n]*ago[^\n]*)", main)
         if meta:
@@ -73,6 +93,7 @@ class LinkedInPortal(Portal):
         job.applicants = self._applicants(main)
         i = main.find("About the job")
         job.description = main[i + 13:i + 9000].strip() if i >= 0 else main[:6000]
+        job.experience = experience_from_text(job.description)
         for lab in ("Hybrid", "Remote", "On-site"):
             if f"\n{lab}\n" in main:
                 job.location = f"{job.location} ({lab})"
@@ -81,7 +102,7 @@ class LinkedInPortal(Portal):
             if f"\n{lab}\n" in main:
                 job.employment_type = lab
                 break
-        if re.search(r"\n(Applied|Application submitted|You applied)\b", main):
+        if re.search(r"\n(Applied \d+ \w+ ago|Application submitted|You applied)\b", main):
             return job, ApplyMode.ALREADY_APPLIED
         if pg.locator("button[aria-label^='Easy Apply']").count():
             return job, ApplyMode.NAUKRI
@@ -124,15 +145,13 @@ class LinkedInPortal(Portal):
             ans = answerer(q, opts, "radio")
             idx = ans.selected_option_indices[0] if ans and ans.selected_option_indices else None
             if idx is None:
-                yes = next((i for i, o in enumerate(opts) if o.lower() == "yes"), None)
-                idx = yes if yes is not None else None
-            if idx is None:
                 result.notes = f"unanswered: {q[:80]}"; ok = False; continue
             els[idx].click(); time.sleep(0.4)
-            result.questions.append({"question": q, "kind": "radio", "options": opts, "answer": opts[idx], "source": "rules" if ans else "default-yes"})
+            result.questions.append({"question": q, "kind": "radio", "options": opts, "answer": opts[idx], "source": "rules"})
         # selects
         for sel in dlg.locator("select").all():
-            q = (sel.get_attribute("aria-label") or "").strip() or dlg.evaluate("(s) => (document.querySelector('label[for=\"'+s.id+'\"]')||{}).innerText || ''", sel.element_handle()).strip()
+            # evaluate on the <select> itself (Locator.evaluate passes its own element as the first argument)
+            q = (sel.get_attribute("aria-label") or "").strip() or sel.evaluate("(s) => (s.id && document.querySelector('label[for=\"'+s.id+'\"]') || s.closest('label') || {}).innerText || ''").strip()
             if not q or q.lower().startswith("email"):
                 continue
             opts = [o.strip() for o in sel.locator("option").all_inner_texts()]
@@ -148,11 +167,11 @@ class LinkedInPortal(Portal):
                 pick = next((o for o in real if o.lower().startswith("india")), None)
                 if pick: sel.select_option(label=pick); time.sleep(0.3); continue
             ans = answerer(q, real, "dropdown")
-            choice = real[ans.selected_option_indices[0]] if ans and ans.selected_option_indices else (next((o for o in real if o.lower() == "yes"), None))
+            choice = real[ans.selected_option_indices[0]] if ans and ans.selected_option_indices else None
             if choice is None:
                 result.notes = f"unanswered: {q[:80]}"; ok = False; continue
             sel.select_option(label=choice); time.sleep(0.3)
-            result.questions.append({"question": q, "kind": "dropdown", "options": real, "answer": choice, "source": "rules" if ans else "default-yes"})
+            result.questions.append({"question": q, "kind": "dropdown", "options": real, "answer": choice, "source": "rules"})
         # text inputs / textareas
         for inp in dlg.locator("input[type='text'], input:not([type]), textarea").all():
             q = (inp.get_attribute("aria-label") or "").strip()
@@ -174,8 +193,6 @@ class LinkedInPortal(Portal):
                 continue
             ans = answerer(q, [], "text")
             text = ans.answer_text if ans and ans.answer_text else None
-            if text is None and re.search(r"how many years|years of (work )?experience", q, re.I):
-                text = str(self.profile.get("default_skill_years", 1))
             is_textarea = inp.evaluate("e => e.tagName") == "TEXTAREA"
             if text and is_textarea:
                 text = with_unit(q, text)      # free text: "7.5 LPA", "15 days"
@@ -185,7 +202,7 @@ class LinkedInPortal(Portal):
             if text is None:
                 result.notes = f"unanswered: {q[:80]}"; ok = False; continue
             inp.click(); pg.keyboard.type(text, delay=random.randint(40, 90)); time.sleep(0.3)
-            result.questions.append({"question": q, "kind": "text", "options": [], "answer": text, "source": "rules" if ans else "default"})
+            result.questions.append({"question": q, "kind": "text", "options": [], "answer": text, "source": "rules"})
         return ok
 
     def _resume_page(self, dlg) -> None:
@@ -196,11 +213,14 @@ class LinkedInPortal(Portal):
                 with pg.expect_file_chooser(timeout=10000) as fc:
                     dlg.locator("button:has-text('Upload resume')").first.click()
                 fc.value.set_files(path); time.sleep(6)
-        # pick our resume's radio
+        # pick our resume's radio: compare against each radio's OWN card (the largest ancestor holding no other
+        # radio), not a shared list container, which contains every resume name and matched the first radio
+        own_card = """r => { let e = r;
+            while (e.parentElement && e.parentElement.querySelectorAll("input[type=radio],[role=radio]").length === 1) e = e.parentElement;
+            return e.innerText || ""; }"""
         for r in dlg.locator("[role='radio'], input[type='radio']").all():
             try:
-                container = r.locator("xpath=ancestor::div[contains(., '%s')][1]" % self.resume_name)
-                if container.count():
+                if self.resume_name.lower() in r.evaluate(own_card).lower():
                     r.click(); time.sleep(0.5); return
             except Exception:
                 continue
@@ -211,6 +231,14 @@ class LinkedInPortal(Portal):
 
     def apply(self, job: JobPosting, mode: ApplyMode, answerer) -> ApplyResult:
         pg = self.page
+        try:
+            from ..resume_variants import variant_file, variant_for
+            self._variant_file = variant_file(variant_for(job.title, job.skills))
+            if not os.path.exists(os.path.join("output", "resumes", self._variant_file)):
+                self._variant_file = None
+        except Exception:
+            self._variant_file = None
+        log.info("  resume: %s", self.resume_name)
         if mode == ApplyMode.COMPANY_SITE:
             return ApplyResult("saved_for_manual", external_url=job.url)
         if pg.url.split("?")[0].rstrip("/") != job.url.rstrip("/"):
@@ -224,7 +252,7 @@ class LinkedInPortal(Portal):
                     pg.reload(); time.sleep(random.uniform(5, 7))
         if not btn.count():
             main = pg.locator("main").first.inner_text() if pg.locator("main").count() else ""
-            if re.search(r"\n(Applied|Application submitted)\b", main):
+            if re.search(r"\n(Applied \d+ \w+ ago|Application submitted)\b", main):
                 return ApplyResult("skipped", "already applied")
             if pg.locator("button[aria-label^='Apply'], a[aria-label^='Apply']").count():
                 return ApplyResult("saved_for_manual", "external apply", external_url=job.url)
@@ -238,6 +266,8 @@ class LinkedInPortal(Portal):
             if not dlg.count():
                 return ApplyResult("failed", "dialog vanished")
             text = dlg.inner_text()
+            if re.search(r"reached (the|your) (daily )?(Easy Apply )?(application )?limit|limit (on|for) Easy Apply", text, re.I):
+                self._dismiss(); return ApplyResult("quota", "LinkedIn Easy Apply daily limit reached")
             if re.search(r"application (was )?sent|Your application was sent|Application submitted", text, re.I):
                 result.status = "applied"; break
             if "Resume" in text and dlg.locator("button:has-text('Upload resume')").count():
@@ -255,8 +285,10 @@ class LinkedInPortal(Portal):
                     pass
                 submit.first.click(); time.sleep(random.uniform(4, 6))
                 after = self._modal().inner_text() if self._modal().count() else pg.locator("main").first.inner_text()
-                result.status = "applied" if re.search(r"application (was )?sent|submitted|applied", after, re.I) else "applied_partial"
-                result.notes = result.notes or "submitted"
+                confirmed = re.search(r"application was sent|your application was sent|application submitted", after, re.I)
+                # Submit was pressed: never retry (a retry could apply twice). Unconfirmed is final and counts toward caps.
+                result.status = "applied" if confirmed else "submitted_unconfirmed"
+                result.notes = "submitted" if confirmed else "clicked Submit but no 'application sent' confirmation"
                 break
             nxt = dlg.locator("button[aria-label='Continue to next step'], button:has-text('Next'), button[aria-label='Review your application'], button:has-text('Review')").first
             if not nxt.count():
@@ -270,6 +302,7 @@ class LinkedInPortal(Portal):
                     return ((box && box.innerText) || d.innerText).trim().replace(/\\s+/g, ' ').slice(0, 140); }""")
                 self._dismiss(); return ApplyResult("deferred", f"stuck on page: {q}", result.questions)
             errs = self._modal().evaluate("el => Array.from(el.querySelectorAll('[class*=error], [role=alert]')).filter(e=>e.offsetParent!==null && e.innerText.trim()).map(e=>e.innerText.trim().slice(0,60))") if self._modal().count() else []
+            errs = [e for e in errs if not re.search(r"success|uploaded", e, re.I)]   # LinkedIn's green notices use role=alert too
             if errs and step > 0 and "Additional Questions" in text:
                 # we already tried answering this page; a remaining error means a field we cannot fill
                 self._dismiss(); return ApplyResult("deferred", "validation: " + "; ".join(errs[:3]), result.questions)

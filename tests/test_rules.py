@@ -104,7 +104,8 @@ def test_live_indeed_questions_2026_10_04():
     a = lambda q: rule_answer(q, [], "text", p).answer_text
     assert a("How many years of Python experience do you have?\xa0*") == "3"
     assert a("What is your current CTC & Notice period?") == "Current CTC: 7.5 LPA; Notice period: 15 days"
-    assert a("Do you have hands-on experience with Azure Data Lake and Databricks? If yes, please briefly describe").startswith("Yes. ")
+    # a "describe" answer must be specific to the skill, so rules leave it to the model (no canned paragraph)
+    assert rule_answer("Do you have hands-on experience with Azure Data Lake and Databricks? If yes, please briefly describe", [], "text", p) is None
     assert a("Must have exp in Python,AWS Cloud Services,LangChain") == "Yes."
     assert a("Do you have 5-7 years of total experience?") == "I have 2 years of total professional experience."
     assert a("What is your NP? Mention in days") == "15"
@@ -117,3 +118,25 @@ def test_immediate_availability_is_honest_about_notice():
     assert rule_answer("Are you available to start immediately?", ["Yes", "No"], "radio", p).selected_option_indices == [1]
     assert rule_answer("Can you join within 30 days?", ["Yes", "No"], "radio", p).selected_option_indices == [0]
     assert rule_answer("How soon can you join?", [], "text", p).answer_text == "Within 15 days"
+
+
+def test_sensitive_questions_are_never_auto_answered():
+    """Review 9 Oct 2026: these were answered "Yes" by the willingness/consent rules."""
+    p = dict(P, default_willingness="Yes", assume_skill_experience=True)
+    for q in ["Are you willing to undergo a medical examination?", "Are you comfortable with a drug and alcohol test?",
+              "Are you willing to sign a 2 year service agreement?", "I agree to a 2 year bond with a penalty of 2 lakh",
+              "Are you okay with an unpaid internship?", "Are you comfortable working 6 days a week?",
+              "I declare that I have no medical conditions", "Have you passed through any physical ailment or illness?",
+              "Are you able to perform the essential functions with or without reasonable accommodation?",
+              "Are you willing to sign a non-compete?", "Is a stipend of 15k okay?"]:
+        assert rule_answer(q, ["Yes", "No"], "radio", p) is None, q
+
+
+def test_skill_tenure_is_judged_against_real_years():
+    p = dict(P, skill_years={"python": 3, "llm": 2}, assume_skill_experience=True)
+    yn = lambda q: ["Yes", "No"][rule_answer(q, ["Yes", "No"], "radio", p).selected_option_indices[0]]
+    assert yn("Do you have 5+ years of experience in Python?") == "No"
+    assert yn("Do you have at least 2 years of experience with Python?") == "Yes"
+    assert yn("Do you have 3-5 years of experience in Python?") == "Yes"
+    assert yn("Do you have at least 4 years of experience with LLMs?") == "No"
+    assert yn("Do you have experience in Python?") == "Yes"

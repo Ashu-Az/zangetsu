@@ -34,8 +34,8 @@ def test_parse_job_page():
 def test_build_search_urls(monkeypatch):
     s = Settings(keywords=["data scientist", "ML engineer"], location="bangalore", pages_per_keyword=2, experience_years="3", max_job_age_days=0, min_salary_lpa=0)
     urls = build_search_urls(s)
-    assert urls[0] == "https://www.naukri.com/data-scientist-jobs-in-bangalore?experience=3"
-    assert urls[1] == "https://www.naukri.com/data-scientist-jobs-in-bangalore-2?experience=3"
+    assert urls[0] == "https://www.naukri.com/data-scientist-jobs-in-bangalore"
+    assert urls[1] == "https://www.naukri.com/data-scientist-jobs-in-bangalore-2"
     assert urls[2].startswith("https://www.naukri.com/ml-engineer-jobs-in-bangalore")
     s2 = Settings(keywords=["data scientist"], location="", pages_per_keyword=1, experience_years="", max_job_age_days=0, min_salary_lpa=0)
     assert build_search_urls(s2) == ["https://www.naukri.com/data-scientist-jobs"]

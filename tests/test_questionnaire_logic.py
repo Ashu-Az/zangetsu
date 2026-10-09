@@ -29,6 +29,12 @@ class ScriptedHandler(DrawerHandler):
         self.transcript = []
         self.steps = list(steps)
         self.filled = []
+        self.msg_count_at_answer = None
+        self.assist = False
+        self.posted = 1                  # bot messages shown so far; each answered step brings the next one
+
+    def bot_message_count(self):
+        return self.posted
 
     def drawer_visible(self):
         return bool(self.steps)
@@ -42,6 +48,7 @@ class ScriptedHandler(DrawerHandler):
     def fill(self, kind, answer, options):
         self.filled.append((kind, answer.answer_text, list(answer.selected_option_indices)))
         self.steps.pop(0)
+        self.posted += 1
 
     def close_drawer(self):
         self.steps.clear()
@@ -68,7 +75,8 @@ def test_answers_radio_then_text_and_caches_reusable(tmp_path, monkeypatch):
     assert res.completed and len(res.answered) == 2
     assert h.filled[0] == ("radio", "30 days", [1])
     assert h.filled[1][0] == "text"
-    assert cache.lookup("What is your notice period?", ["Immediate", "30 days", "60 days"])["indices"] == [1]
+    # rule answers are recomputed from the profile every time, never cached (a fixed rule applies at once)
+    assert cache.lookup("What is your notice period?", ["Immediate", "30 days", "60 days"]) is None
     # second application: cache hit, no LLM call for the radio question
     h2, llm2, _ = make(tmp_path, [("What is your notice period?", "radio", ["Immediate", "30 days", "60 days"])])
     h2.run()

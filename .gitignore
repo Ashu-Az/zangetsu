@@ -21,3 +21,7 @@ __pycache__/
 *.pyc
 .pytest_cache/
 .venv/
+profile/resume_variants.yaml
+
+# Run inputs: job/company URL lists and one-off scripts (may hold personal paths)
+inputs/

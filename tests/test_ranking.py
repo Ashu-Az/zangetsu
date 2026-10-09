@@ -83,7 +83,7 @@ def test_freshness_parsing_and_filter():
     job_old = JobPosting(job_id="1", url="u", title="Data Scientist", experience="1 - 4 years", applicants=5, posted="Posted: 3 days ago")
     assert eligibility(job_old, ApplyMode.NAUKRI, Settings(experience_years="2", max_job_age_days=1, min_salary_lpa=0), {}).startswith("too_old")
     urls = __import__("naukri_bot.search", fromlist=["build_search_urls"]).build_search_urls(Settings(keywords=["ai engineer"], location="", pages_per_keyword=1, experience_years="2", max_job_age_days=1, min_salary_lpa=0))
-    assert urls == ["https://www.naukri.com/ai-engineer-jobs?experience=2&jobAge=1"]
+    assert urls == ["https://www.naukri.com/ai-engineer-jobs?jobAge=1"]
 
 
 def test_salary_filter():
@@ -106,7 +106,7 @@ def test_salary_filter():
     assert eligibility(job, ApplyMode.NAUKRI, Settings(experience_years="2", min_salary_lpa=10, max_job_age_days=0), {}).startswith("salary_below")
     url = build_search_urls(Settings(keywords=["ai engineer"], location="", pages_per_keyword=1, experience_years="2", max_job_age_days=1, min_salary_lpa=10))[0]
     # salary is filtered per posting, never via Naukri's ctcFilter facet (it breaks keyword matching)
-    assert url == "https://www.naukri.com/ai-engineer-jobs?experience=2&jobAge=1"
+    assert url == "https://www.naukri.com/ai-engineer-jobs?jobAge=1"
 
 
 def test_direct_apply_cap_is_separate():

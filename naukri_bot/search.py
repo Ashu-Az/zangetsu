@@ -38,8 +38,9 @@ def build_search_urls(settings: Settings, keywords: list[str] | None = None) -> 
         for page in range(1, settings.pages_per_keyword + 1):
             url = base if page == 1 else f"{base}-{page}"
             params = []
-            if settings.experience_years:
-                params.append(f"experience={settings.experience_years}")
+            # No experience= here: verified live 2026-10-05 that it makes Naukri drop the keyword. "data scientist"
+            # returned 926 matching jobs without it and 120 generic ones with it, the same pool for every keyword.
+            # Experience is checked per posting in ranking.eligibility (JobPosting.experience_fits).
             if settings.max_job_age_days:
                 params.append(f"jobAge={settings.max_job_age_days}")   # Naukri's "Freshness" filter
             # No ctcFilter here: verified live 2026-10-04 that Naukri's salary facet shrinks results to the
@@ -81,10 +82,65 @@ def parse_cards(html: str) -> list[JobCard]:
     return cards
 
 
+def _base_of(url: str) -> str:
+    """Search URL without its page suffix: /ai-engineer-jobs-3?x -> /ai-engineer-jobs?x."""
+    return re.sub(r"(-jobs(?:-in-[a-z0-9-]+?)?)-\d+(\?|$)", r"\1\2", url)
+
+
+RECOMMENDED_URL = "https://www.naukri.com/mnjuser/recommendedjobs"
+RECOMMENDED_TABS = ["profile", "apply", "preference", "similar_jobs"]   # Profile, Applies, Preferences, You might like
+
+
+def parse_recommended(html: str) -> list[JobCard]:
+    """Cards on the Recommended jobs page: article.jobTuple[data-job-id], no links (verified 2026-10-05)."""
+    soup = BeautifulSoup(html, "lxml")
+    out = []
+    for a in soup.select("article.jobTuple[data-job-id]"):
+        jid = a.get("data-job-id", "").strip()
+        title = a.select_one("p.title")
+        if not jid or not title:
+            continue
+
+        def txt(sel: str) -> str:
+            el = a.select_one(sel)
+            return el.get_text(" ", strip=True) if el else ""
+
+        out.append(JobCard(job_id=jid, title=title.get_text(" ", strip=True), company=txt(".subTitle"),
+                           url=f"https://www.naukri.com/job-listings-{jid}", experience=txt("li.experience"),
+                           location=txt("li.location"), snippet=txt(".job-description"),
+                           posted=txt(".plcHolder .fw500") or txt(".plcHolder"),
+                           skills=[li.get_text(" ", strip=True) for li in a.select("li.dot")], source="recommended"))
+    return out
+
+
+def collect_recommended(browser) -> list[JobCard]:
+    """Every card from every tab of Naukri's Recommended jobs page."""
+    cards: dict[str, JobCard] = {}
+    browser.goto(RECOMMENDED_URL)
+    for tab in RECOMMENDED_TABS:
+        try:
+            browser.page.locator(f".tab-wrapper#{tab} .tab-list-item, #{tab} .tab-list-item, #{tab}").first.click(timeout=5000)
+            browser.page.wait_for_selector("article.jobTuple[data-job-id]", timeout=10000)
+            for _ in range(8):                      # the list loads as you scroll
+                browser.page.mouse.wheel(0, 3000)
+                browser.page.wait_for_timeout(700)
+        except Exception as e:
+            log.warning("Recommended tab %s: %s", tab, e.__class__.__name__)
+            continue
+        found = parse_recommended(browser.page.content())
+        new = [c for c in found if c.job_id not in cards]
+        cards.update({c.job_id: c for c in new})
+        log.info("Recommended / %-12s %d cards, %d new", tab, len(found), len(new))
+    return list(cards.values())
+
+
 def collect_cards(browser, urls: list[str]) -> list[JobCard]:
     seen: set[str] = set()
     out: list[JobCard] = []
+    exhausted: set[str] = set()     # searches whose last page was short: Naukri serves page 1 again past the end
     for url in urls:
+        if _base_of(url) in exhausted:
+            continue
         log.info("Search: %s", url)
         try:
             browser.goto(url)
@@ -93,6 +149,8 @@ def collect_cards(browser, urls: list[str]) -> list[JobCard]:
             log.warning("No job cards on %s (%s)", url, e.__class__.__name__)
             continue
         found = parse_cards(browser.page.content())
+        if len(found) < 20:
+            exhausted.add(_base_of(url))
         new = [c for c in found if c.job_id not in seen]
         seen.update(c.job_id for c in new)
         out.extend(new)

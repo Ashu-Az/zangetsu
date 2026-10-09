@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import random
+import re
 import time
 from dataclasses import dataclass, field
 
@@ -30,12 +31,16 @@ class QuestionnaireResult:
     notes: str = ""
 
 
+INFO_MESSAGE = re.compile(r"recruiter requires more information|please answer (the following|a few)|"
+                          r"answer (a few|the following) questions|to consider your appl", re.I)
+
+
 class NeedsModel(Exception):
     """Raised when a question needs the language model and none is configured."""
 
 
 class DrawerHandler:
-    def __init__(self, browser, llm: LLM | None, cache: AnswerCache, tracker: Tracker, job: JobPosting):
+    def __init__(self, browser, llm: LLM | None, cache: AnswerCache, tracker: Tracker, job: JobPosting, assist: bool = False):
         self.b = browser
         self.page = browser.page
         self.llm = llm
@@ -43,6 +48,8 @@ class DrawerHandler:
         self.tracker = tracker
         self.job = job
         self.transcript: list[str] = []
+        self.msg_count_at_answer: int | None = None   # bot-message count when we last sent an answer
+        self.assist = assist                           # ask the person at the keyboard instead of abandoning a question
 
     # ---------- DOM reads ----------
     def drawer_visible(self) -> bool:
@@ -53,6 +60,25 @@ class DrawerHandler:
         while time.time() < deadline:
             if self.drawer_visible():
                 pause(1.5, 2.5)
+                return True
+            time.sleep(0.5)
+        return False
+
+    def bot_message_count(self) -> int:
+        try:
+            return self.page.locator(S.BOT_MESSAGES).count()
+        except Exception:
+            return 0
+
+    def wait_for_next_message(self, timeout_s: float = 8) -> bool:
+        """After an answer, wait until the bot posts something new, so the previous question's text
+        is never paired with the next question's options."""
+        if self.msg_count_at_answer is None:
+            return True
+        deadline = time.time() + timeout_s
+        while time.time() < deadline:
+            if self.bot_message_count() > self.msg_count_at_answer or not self.drawer_visible():
+                time.sleep(1.0)          # typing indicator -> real text
                 return True
             time.sleep(0.5)
         return False
@@ -145,12 +171,54 @@ class DrawerHandler:
         else:  # free text in contenteditable
             box = self.b.first_visible(S.TEXT_INPUT)
             box.click()
+            box.evaluate("e => { if (e.isContentEditable) e.innerText = ''; else e.value = ''; }")
             self.page.keyboard.type(answer.answer_text, delay=random.randint(35, 110))
         pause(0.5, 1.2)
         if not self._click_send():
             # chatbot text box also submits on Enter
             if kind in ("text", "suggestor"):
                 self.page.keyboard.press("Enter")
+
+    # ---------- assisted mode ----------
+    def ask_human(self, question: str, kind: str, options: list[str], timeout_s: int = 300) -> bool:
+        """Leave the question open, alert the person at the keyboard, and wait for them to answer it in the browser.
+        Returns True once the chat moves on (new bot message or the drawer closed); the answer is saved for reuse."""
+        import subprocess
+        log.warning("   >>> YOUR TURN: answer in the Chromium window: %s", question[:120])
+        try:
+            msg = question.replace('"', "'")[:120]
+            subprocess.run(["osascript", "-e", f'display notification "{msg}" with title "Naukri bot needs your answer" sound name "Glass"'],
+                           timeout=5, capture_output=True)
+            subprocess.Popen(["say", "Naukri needs your answer"])
+        except Exception:
+            pass
+        base = self.bot_message_count()
+        deadline = time.time() + timeout_s
+        while time.time() < deadline:
+            time.sleep(1.5)
+            if not self.drawer_visible() or self.bot_message_count() > base:
+                answer = self.latest_user_message()
+                log.info("   A(you): %s", answer[:160] or "(answered)")
+                self.tracker.record_answer(self.job, question, kind, options, answer or "(answered in browser)", "human")
+                if answer:
+                    idx = [i for i, o in enumerate(options) if o.strip().lower() == answer.strip().lower()]
+                    if not options or idx:
+                        self.cache.save(question, options, answer, idx, source="human")   # same question next time: answered automatically
+                self.transcript.append(f"Q: {question}\nA: {answer}")
+                return True
+        log.warning("   no answer within %ds", timeout_s)
+        return False
+
+    def latest_user_message(self) -> str:
+        loc = self.page.locator(S.USER_MESSAGES)
+        for i in range(loc.count() - 1, -1, -1):
+            try:
+                t = loc.nth(i).inner_text().strip()
+            except Exception:
+                continue
+            if t:
+                return t
+        return ""
 
     def close_drawer(self) -> None:
         try:
@@ -161,15 +229,23 @@ class DrawerHandler:
 
     # ---------- answer sourcing ----------
     def _get_answer(self, question: str, kind: str, options: list[str], rejected: str | None) -> tuple[QuestionAnswer, str]:
+        from .rules import rule_answer
+        from .config import load_profile
+        # An answer the person gave by hand beats every rule: it is how a misfiring rule gets corrected.
+        if not rejected:
+            hit = self.cache.lookup(question, options)
+            if hit and hit.get("source") == "human":
+                return QuestionAnswer(answer_text=hit["answer_text"], selected_option_indices=hit["indices"],
+                                      reusable=True, skip=False, confidence=1.0), "cache"
+        ruled = rule_answer(question, options, kind, load_profile())
+        if ruled is not None and not rejected:
+            return ruled, "rules"
         if not rejected:
             hit = self.cache.lookup(question, options)
             if hit:
                 return QuestionAnswer(answer_text=hit["answer_text"], selected_option_indices=hit["indices"],
                                       reusable=True, skip=False, confidence=1.0), "cache"
-        from .rules import rule_answer
-        from .config import load_profile
-        ruled = rule_answer(question, options, kind, load_profile())
-        if ruled is not None:
+        if ruled is not None and not self.llm:
             return ruled, "rules"
         if not self.llm:
             raise NeedsModel(question)
@@ -197,14 +273,26 @@ class DrawerHandler:
                 result.completed = True
                 result.notes = "drawer closed"
                 return result
+            got_new = self.wait_for_next_message()
             question = self.latest_bot_message()
             if any(t.lower() in question.lower() for t in S.APPLY_SUCCESS_TEXT):
                 result.completed = True
                 result.notes = "success message"
                 return result
+            if INFO_MESSAGE.search(question) and "?" not in question:
+                # Naukri's intro bubble ("The recruiter requires more information ..."): not a question
+                self.msg_count_at_answer = self.bot_message_count()
+                if self.wait_for_next_message(timeout_s=6):
+                    continue
             kind, options = self.detect_input()
             if kind is None:
                 idle += 1
+                if idle >= 8 and self.assist and self.drawer_visible() and not self.b.text_present(S.APPLY_SUCCESS_TEXT):
+                    # an input the bot cannot see or fill (date picker, file upload, ...): hand it to the person
+                    if self.ask_human(question or "(unrecognised input in the questionnaire)", "unknown", []):
+                        idle = 0
+                        self.msg_count_at_answer = None
+                        continue
                 if idle >= 8:
                     result.completed = self.b.text_present(S.APPLY_SUCCESS_TEXT) or not self.drawer_visible()
                     result.notes = "no input shown; assumed finished" if result.completed else "stalled"
@@ -215,7 +303,7 @@ class DrawerHandler:
 
             key = (question, kind, tuple(options))
             rejected = None
-            if key == last_key:
+            if key == last_key or (not got_new and last_key and question == last_key[0]):
                 repeats += 1
                 if repeats == 1:
                     log.info("   same question still showing; re-sending")
@@ -236,6 +324,11 @@ class DrawerHandler:
             try:
                 ans, source = self._get_answer(question, kind, options, rejected)
             except NeedsModel:
+                if self.assist and self.ask_human(question, kind, options):
+                    result.answered.append({"question": question, "kind": kind, "options": options, "answer": "(you)", "source": "human"})
+                    last_key = None
+                    self.msg_count_at_answer = None
+                    continue
                 result.notes = f"needs model: {question[:100]}"
                 log.info("   deferred, open question needs the model")
                 self.close_drawer()
@@ -247,12 +340,18 @@ class DrawerHandler:
                 return result
 
             if ans.skip or (not ans.answer_text and not ans.selected_option_indices):
+                if self.assist and self.ask_human(question, kind, options):
+                    result.answered.append({"question": question, "kind": kind, "options": options, "answer": "(you)", "source": "human"})
+                    last_key = None
+                    self.msg_count_at_answer = None
+                    continue
                 result.notes = f"could not answer truthfully: {question[:80]}"
                 log.warning("   skipping job: %s", result.notes)
                 self.close_drawer()
                 return result
 
             log.info("   A(%s): %s", source, ans.answer_text[:160])
+            self.msg_count_at_answer = self.bot_message_count()   # before sending: a fast reply must count as new
             try:
                 self.fill(kind, ans, options)
             except (PWTimeout, Exception) as e:
@@ -265,7 +364,7 @@ class DrawerHandler:
                                     "answer": ans.answer_text, "source": source})
             self.transcript.append(f"Q: {question}\nA: {ans.answer_text}")
             self.tracker.record_answer(self.job, question, kind, options, ans.answer_text, source)
-            if source in ("llm", "rules") and ans.reusable and not rejected:
+            if source == "llm" and ans.reusable and not rejected:
                 self.cache.save(question, options, ans.answer_text, ans.selected_option_indices)
             if rejected:
                 self.cache.forget(question, options)

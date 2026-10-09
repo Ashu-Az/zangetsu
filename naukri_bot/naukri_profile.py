@@ -9,7 +9,7 @@ import time
 
 import yaml
 
-from .config import PROFILE_DIR
+from .config import PROFILE_DIR, STATE_DIR
 from .humanize import pause
 
 log = logging.getLogger(__name__)
@@ -681,3 +681,53 @@ def delete_duplicate_projects(page) -> int:
             page.reload(); pause(3, 4)
             break
     return removed
+
+
+# ------------------------------------------------------------------ freshness refresh
+REFRESH_STATE = STATE_DIR / "profile_refresh.json"
+MIN_REFRESH_GAP_H = 3
+
+
+def refresh(browser, force: bool = False) -> tuple[bool, str]:
+    """Re-save the resume headline so Naukri marks the profile as updated today.
+
+    Recruiter search on Naukri favours recently updated profiles, and any saved edit counts. The headline alternates
+    between `headline` and `headline_alt` from naukri_profile.yaml (or the same text with a trailing full stop), so
+    the content never really changes. At most one refresh per MIN_REFRESH_GAP_H hours."""
+    import json
+    from datetime import datetime
+    state = {}
+    if REFRESH_STATE.exists():
+        try:
+            state = json.loads(REFRESH_STATE.read_text())
+        except ValueError:
+            state = {}
+    last = state.get("last")
+    if last and not force:
+        age_h = (datetime.now() - datetime.fromisoformat(last)).total_seconds() / 3600
+        if age_h < MIN_REFRESH_GAP_H:
+            return False, f"skipped: last refresh {age_h:.1f} h ago (minimum gap {MIN_REFRESH_GAP_H} h)"
+    # Read the headline as it is on Naukri now (never overwrite it with stale text from a file), then toggle a
+    # trailing full stop: the content stays the same, but Naukri records an update.
+    browser.goto(PROFILE_URL, settle=(4, 5))
+    page = browser.page
+    drawer = _open_drawer(page, "lazyResumeHead")
+    current = " ".join(drawer.locator("#resumeHeadlineTxt").input_value().split())
+    page.keyboard.press("Escape"); pause(1.0, 1.5)
+    if len(current) < 20:
+        return False, "could not read the current headline; not touching it"
+    text = current[:-1] if current.endswith(".") else current + "."
+    use_alt = text.endswith(".")
+    browser.goto(PROFILE_URL, settle=(3, 4))
+    ok = update_headline(browser.page, text)
+    if not ok:
+        return False, "headline save failed"
+    browser.goto(PROFILE_URL, settle=(3, 4))
+    body = browser.page.inner_text("body")
+    import re as _re
+    m = _re.search(r"(Profile )?[Ll]ast updated\s*[-:]?\s*([^\n]{2,20})", body)
+    seen = m.group(2).strip() if m else "?"
+    state.update({"last": datetime.now().isoformat(timespec="minutes"), "used_alt": use_alt, "naukri_says": seen})
+    REFRESH_STATE.parent.mkdir(parents=True, exist_ok=True)
+    REFRESH_STATE.write_text(json.dumps(state, indent=2))
+    return True, f"headline re-saved ({'alt' if use_alt else 'base'}); Naukri shows last updated: {seen}"

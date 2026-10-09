@@ -7,6 +7,7 @@ import re
 from pathlib import Path
 
 from .config import STATE_DIR
+from .tracker import _write_atomic
 
 
 def normalize(text: str) -> str:
@@ -26,8 +27,13 @@ class AnswerCache:
                 self.entries = []
 
     def lookup(self, question: str, options: list[str], threshold: float = 0.9) -> dict | None:
+        """Best cached answer for this question, with `indices` re-computed for the options as shown now.
+        Stored answers are option *labels*, so a reordered option list cannot flip Yes and No."""
         q = normalize(question)
-        opts = sorted(normalize(o) for o in options)
+        if not q:                      # non-Latin text normalizes to "", which would match everything
+            return None
+        cur = [normalize(o) for o in options]
+        opts = sorted(cur)
         best, best_ratio = None, 0.0
         for e in self.entries:
             if e["options"] != opts:
@@ -35,19 +41,34 @@ class AnswerCache:
             ratio = difflib.SequenceMatcher(None, q, e["question"]).ratio()
             if ratio > best_ratio:
                 best, best_ratio = e, ratio
-        return best if best and best_ratio >= threshold else None
+        if not best or best_ratio < threshold:
+            return None
+        if not options:
+            return {**best, "indices": []}
+        labels = best.get("labels")
+        if labels is None:             # entry from before labels were stored: positions are not trustworthy
+            return None
+        try:
+            indices = [cur.index(l) for l in labels]
+        except ValueError:
+            return None
+        return {**best, "indices": indices, "answer_text": ", ".join(options[i] for i in indices)}
 
-    def save(self, question: str, options: list[str], answer_text: str, indices: list[int]) -> None:
+    def save(self, question: str, options: list[str], answer_text: str, indices: list[int], source: str = "auto") -> None:
         q = normalize(question)
+        if not q:
+            return
         opts = sorted(normalize(o) for o in options)
+        labels = [normalize(options[i]) for i in indices if 0 <= i < len(options)]
+        if options and not labels:
+            return
         self.entries = [e for e in self.entries if not (e["question"] == q and e["options"] == opts)]
         self.entries.append({"question": q, "raw_question": question, "options": opts,
-                             "raw_options": options, "answer_text": answer_text, "indices": indices})
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(json.dumps(self.entries, indent=2, ensure_ascii=False), encoding="utf-8")
+                             "raw_options": options, "answer_text": answer_text, "labels": labels, "source": source})
+        _write_atomic(self.path, json.dumps(self.entries, indent=2, ensure_ascii=False))
 
     def forget(self, question: str, options: list[str]) -> None:
         q = normalize(question)
         opts = sorted(normalize(o) for o in options)
         self.entries = [e for e in self.entries if not (e["question"] == q and e["options"] == opts)]
-        self.path.write_text(json.dumps(self.entries, indent=2, ensure_ascii=False), encoding="utf-8")
+        _write_atomic(self.path, json.dumps(self.entries, indent=2, ensure_ascii=False))

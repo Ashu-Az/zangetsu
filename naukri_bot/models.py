@@ -25,6 +25,7 @@ class JobCard:
     snippet: str = ""
     posted: str = ""
     skills: list[str] = field(default_factory=list)
+    source: str = "search"             # "search" or "recommended" (Naukri's Recommended jobs page)
 
 
 @dataclass
@@ -48,6 +49,11 @@ class JobPosting:
     role_category: str = ""
     education: str = ""
     about_company: str = ""
+    # Naukri "Job match score" ticks: {"early applicant": True, "keyskills": False, ...}; empty if not shown
+    match: dict = field(default_factory=dict)
+
+    def match_count(self) -> int:
+        return sum(1 for v in self.match.values() if v)
 
     def experience_range(self) -> tuple[int | None, int | None]:
         """'2 - 5 years' -> (2, 5); '3+ years' -> (3, None); '' -> (None, None)."""

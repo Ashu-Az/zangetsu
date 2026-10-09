@@ -1,11 +1,12 @@
 # Zangetsu
 
-A job-application agent for Indian tech job portals. It finds fresh postings that match a candidate's profile, ranks them by how likely an application is to be seen, and applies, answering recruiter screening questions from the candidate's own data. Jobs that can only be applied to on an employer's website are saved with the link, and can get a tailored resume, for a human to finish.
+A job-application agent for Indian tech job portals and employer career sites. It finds fresh postings that match a candidate's profile, ranks them by how likely an application is to be seen, tailors a resume that stays within the candidate's real experience, and applies, answering screening questions from the candidate's own data and verifying every submission on the site.
 
-Supported portals: **Naukri, LinkedIn (Easy Apply), Indeed (Easily apply), Hirist, Wellfound.**
+Supported: **Naukri** (search, recommended jobs, recruiter invitations, profile refresh), **LinkedIn** Easy Apply, **Indeed**, **Hirist**, **Wellfound**, and employer career sites: **Workday** tenants, **Greenhouse / Lever / Ashby** boards, big-tech career APIs, and generic company application forms.
 
 ```
-python -m naukri_bot portal all      # Naukri, then LinkedIn, Hirist, Wellfound, Indeed
+scripts/cycle.sh            # one full cycle: refresh, invitations, portals, top companies, career sites
+python -m naukri_bot portal all
 ```
 
 > **Use responsibly.** Automated applying is against the terms of service of most job portals and can get an account restricted. This project keeps volume deliberately low (per-site daily caps, human-paced delays, a real logged-in browser), never fabricates experience, and records every answer it gives so you can audit it. You are responsible for what is submitted in your name.
@@ -17,6 +18,7 @@ python -m naukri_bot portal all      # Naukri, then LinkedIn, Hirist, Wellfound,
 1. [Design goals](#design-goals)
 2. [Architecture](#architecture)
 3. [The pipeline, stage by stage](#the-pipeline-stage-by-stage)
+   - [The daily cycle and employer career sites](#the-daily-cycle-and-employer-career-sites)
 4. [Answering screening questions](#answering-screening-questions)
 5. [Portal adapters](#portal-adapters)
 6. [State, data and outputs](#state-data-and-outputs)
@@ -160,12 +162,51 @@ Applications stop at the per-site daily cap (`min(adapter.daily_cap, DAILY_QUOTA
 | `applied_partial` | Naukri registered the application on the Apply click, but the questionnaire was not completed | no |
 | `saved_for_manual` | employer-site job; URL (and tailored resume) saved | no |
 | `deferred` | a question could not be answered safely without a model | yes |
-| `failed` | technical failure (timeout, layout change) | once |
+| `failed` | technical failure before anything was sent (timeout, layout change, form still open) | once |
+| `submitted_unconfirmed` | Submit was pressed but the site showed no confirmation | **no**: final, counts toward caps and the 30-day duplicate check, so it can never be sent twice |
+| `crashed_after_submit` | `company-apply --submit` crashed mid-application | no (same reason) |
+| `quota` | the site refused the application (Naukri's silent HTTP 403 past its cap) | yes, after the cooldown |
+| `needs_you` / `ready_for_review` | an employer form has a field only the person can answer | yes, up to 3 times |
 
-**Verification is mandatory.** A click is not an application. Naukri reloads the job page and checks the button state; LinkedIn waits for "Application submitted"; Indeed and Hirist check their applied markers. Unverified attempts are recorded as `failed`, never as `applied`.
+**Verification is mandatory.** A click is not an application. Naukri reloads the job page and checks the button state; LinkedIn waits for "Application submitted"; Indeed and Hirist check their applied markers. Unverified attempts are never recorded as `applied`.
+
+**Refusals stop the run.** Past roughly 50 applications in a rolling 24 hours, Naukri's apply API answers HTTP 403 while the page still shows "Apply" and no message. The bot watches that response, stops at the first refusal, pauses Naukri for 12 hours (`state/cooldowns.json`), and leaves the job queued. Three unconfirmed applies in a row stop it too. Naukri's quota is counted over a rolling 24 hours (`DAILY_QUOTA`, default 45).
 
 ### Employer-site jobs (Naukri)
 When a posting's button says "Apply on company site", the bot captures the redirect URL, writes the posting to `output/jd/`, and (with a model available) builds a resume tailored to that job description: reordered skills, rewritten bullets emphasizing the matching experience, with no invented facts. The output is `output/resumes/*.{pdf,docx,md}`, plus a row in `company_site_jobs.csv` with a keyword-fit score.
+
+## The daily cycle and employer career sites
+
+`scripts/cycle.sh` runs the whole job hunt as ordered stages; each one is also a command of its own:
+
+| stage | command | what it does |
+|---|---|---|
+| 1. Profile refresh | `refresh` | Re-saves the Naukri resume headline (toggling a trailing full stop) so the profile shows *last updated: Today*. At most once per 3 hours; run it 2-3 times a day. |
+| 2. Recruiter invitations | `nvites` | Reads Naukri NVites (`/mnjuser/inbox`), skips ones already applied, applies the normal filters, applies in-pane with the questionnaire handler. Invites that only link to an employer form are saved to `inputs/naukri-nvite-forms.txt`. |
+| 3. Portals | `run`, `portal hirist` | Keyword search, recommended jobs, ranked by applicant count. |
+| 4. Top companies on Naukri | `top-company-sites` | For each `priority_companies` entry (rotating, 12-15 per run), searches Naukri for *role at company* (`/software-engineer-jobs?k=software engineer, walmart`), keeps fitting postings that apply on the company site, and writes their employer links to `inputs/naukri-top-company-sites.txt`. |
+| 5. Career sites | `workday-run`, `company-apply` | Workday tenants and Greenhouse/Lever/Ashby boards are surveyed directly; links from stages 2 and 4 are added. Each job gets a tailored resume, a keyword-coverage report, and the right form adapter. |
+
+### Tailoring, grounding and the coverage score
+Each employer job gets a resume built from `profile/resume_variants.yaml` (AI/ML, backend or full-stack variant chosen from the title and the JD's skills), with skills, bullets and projects re-ordered toward the JD. Optional per-job plans (`output/resumes/custom/*.json`) may re-word it further.
+
+**Grounding check** (`grounding.py`): every skill item, the headline and the summary are checked against the candidate's facts (variants, profile skills, projects, education) plus an explicit table of honest relabels (MongoDB → "NoSQL", FAISS → "vector search", GitHub Actions → "CI/CD"). Anything not grounded is dropped and logged, and an ungrounded headline or summary falls back to the variant's own wording. Practices that can't be inferred from facts (Agile, system design, code reviews, ...) pass only if listed in `extra_skills_confirmed` in `profile.yaml`.
+
+**Coverage score** (`ats_score.report`): the share of the JD's own hard-skill requirements (must-have vs nice-to-have when the JD has sections) that the resume covers, with the missing ones listed as real gaps. It is a keyword-coverage heuristic, not a vendor ATS score.
+
+### Form adapters
+| site | adapter | notes |
+|---|---|---|
+| Workday (`*.myworkdayjobs.com`) | `ats/workday.py` | account sign-in/creation, resume upload (always this job's file), experience and education pages, voluntary disclosures; submits only when every answer comes from trusted sources and no field is unknown |
+| Greenhouse, Lever, Ashby, Keka, Zoho Recruit, plain career pages | `ats/generic_form.py` | label-driven: each field's label is matched to profile facts or the rule engine; unknown required fields stop the form |
+
+Rules that apply to every employer form:
+- **Never a guess.** Fields the bot can't answer from facts become `unknown` and the form goes to the person (`needs_you`). Dates of earlier jobs and education are never filled from a default.
+- **Legal statements go to the person.** Only privacy, terms and data-processing acknowledgements are ticked automatically. Anything about work authorization, citizenship, sponsorship, criminal record, bonds, deposits, medical or relocation is left for the person.
+- **Work authorization depends on the job's country.** It is answered only when the job is in the candidate's authorized country (`work_authorized_in`); "Indianapolis, IN" does not count as India.
+- **Proof of submission.** A confirmation must be new after the click (not a "thank you for your interest" already on the page), or the URL must change to a success page, or the form must disappear. Otherwise the status is `unconfirmed`, which is final.
+- **One tab per application.** Only the tab a click opened is used, and it is closed afterwards, so one company's form can never be submitted under another job.
+- **Never twice.** `company-apply` and `workday` skip URLs already submitted or possibly submitted, and duplicates inside one input file.
 
 ## Answering screening questions
 
@@ -315,7 +356,17 @@ python -m naukri_bot ask "Notice period?" --options "Immediate,15 days,30 days" 
 
 python -m naukri_bot profile headline skills summary   # push profile sections to Naukri
 python -m naukri_bot profile projects --new-only
+python -m naukri_bot refresh                    # keep the Naukri profile "updated today" (3 h minimum gap)
+python -m naukri_bot nvites [--dry-run]         # apply to recruiter invitations that pass the filters
+
+python -m naukri_bot top-company-sites --companies 15     # priority companies' company-site jobs -> inputs/
+python -m naukri_bot workday-run --days 3 --max 8 [--submit]   # Workday tenants: discover, tailor, fill
+python -m naukri_bot workday <url> [--submit]             # one Workday application
+python -m naukri_bot company-apply --file inputs/naukri-top-company-sites.txt [--submit] [--hold]
+python -m naukri_bot leads                      # LinkedIn hiring posts -> leads CSV + outreach drafts (nothing sent)
 ```
+
+Run inputs (URL lists, one-off scripts) live in `inputs/`, which is gitignored.
 
 ## Operating it
 

@@ -13,12 +13,20 @@ log = logging.getLogger(__name__)
 
 
 def make_answerer(profile: dict, cache: AnswerCache):
+    from ..llm import QuestionAnswer
+
+    def cached(hit):
+        return QuestionAnswer(answer_text=hit["answer_text"], selected_option_indices=hit["indices"],
+                              reusable=True, skip=False, confidence=1.0)
+
     def answer(question: str, options: list[str], kind: str):
         hit = cache.lookup(question, options)
-        if hit:
-            from ..llm import QuestionAnswer
-            return QuestionAnswer(answer_text=hit["answer_text"], selected_option_indices=hit["indices"], reusable=True, skip=False, confidence=1.0)
-        return rule_answer(question, options, kind, profile)
+        if hit and hit.get("source") == "human":       # the person's own answer beats every rule
+            return cached(hit)
+        ruled = rule_answer(question, options, kind, profile)
+        if ruled is not None:
+            return ruled
+        return cached(hit) if hit else None
     return answer
 
 
@@ -29,7 +37,7 @@ def run_all(max_apps: int | None, dry_run: bool) -> int:
     for site in order:
         log.info("=" * 60); log.info("PORTAL: %s", site)
         if site == "naukri":
-            args = [sys.executable, "-m", "naukri_bot", "run", "--no-llm"] + (["--dry-run"] if dry_run else []) + (["--max", str(max_apps)] if max_apps else [])
+            args = [sys.executable, "-m", "naukri_bot", "run"] + (["--dry-run"] if dry_run else []) + (["--max", str(max_apps)] if max_apps else [])
         else:
             args = [sys.executable, "-m", "naukri_bot", "portal", site] + (["--dry-run"] if dry_run else []) + (["--max", str(max_apps)] if max_apps else [])
         try:
@@ -57,11 +65,21 @@ def run_portal(site: str, max_apps: int | None, dry_run: bool) -> int:
     except ImportError:
         pass
     cls = portals[site]
+    from ..cooldown import paused_until
+    until = paused_until(site)
+    if until:
+        log.warning("[%s] skipped: cooldown until %s", site, until)
+        return 0
     settings = Settings()
     Settings.browser_profile_dir = property(lambda self, d=cls.profile_dir: STATE_DIR / d)
     profile = load_profile()
-    tracker = Tracker()
-    cap = max_apps if max_apps is not None else min(cls.daily_cap, settings.daily_quota)
+    tracker = Tracker(read_only=dry_run)
+    daily = min(cls.daily_cap, settings.daily_quota)
+    left = max(daily - tracker.applied_today(site), 0)        # caps are per day, across runs
+    cap = min(max_apps, left) if max_apps is not None else left
+    if cap == 0 and not dry_run:
+        log.info("[%s] daily cap of %d already reached today", site, daily)
+        return 0
     with Browser(settings) as b:
         portal = cls(b, settings, profile)
         stats = portal.run(tracker, make_answerer(profile, AnswerCache()), cap, dry_run=dry_run)

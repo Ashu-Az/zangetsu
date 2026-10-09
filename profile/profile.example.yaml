@@ -68,3 +68,13 @@ resume_file: Rohan_Mehta_Resume.pdf
 # Optional Wellfound apply note; {title} and {company} are filled in per job.
 # cover_note: >-
 #   Hi, I'm applying for the {title} role at {company}. ...
+
+# Structured education for career-site forms
+degree: B.Tech
+major: Computer Science
+school: Example Institute of Technology, Delhi
+school_aliases: [EIT, Example Institute of Technology]
+city: New Delhi
+# 10th / 12th marks for Indian application forms
+marks_10th_percent: 90
+marks_12th_percent: 85
