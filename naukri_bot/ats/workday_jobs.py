@@ -70,9 +70,16 @@ class WorkdayJob:
     india_only: bool = True   # False when the role also lists non-Indian locations
 
 
+class WorkdayMaintenance(Exception):
+    """Workday's platform-wide maintenance window (weekends): every tenant redirects to a maintenance page."""
+
+
 def _post(url: str, body: dict) -> dict:
     req = urllib.request.Request(url, data=json.dumps(body).encode(), headers={"Content-Type": "application/json", "Accept": "application/json"})
-    return json.load(urllib.request.urlopen(req, timeout=20))
+    resp = urllib.request.urlopen(req, timeout=20)
+    if "maintenance" in resp.geturl():
+        raise WorkdayMaintenance(resp.geturl())
+    return json.load(resp)
 
 
 def _get(url: str) -> dict:
@@ -97,6 +104,10 @@ def discover(profile: dict, queries: list[str], max_age_days: int = 7, years: fl
         for q in queries:
             try:
                 res = _post(f"{api}/jobs", {"appliedFacets": {}, "limit": 20, "offset": 0, "searchText": f"{q} India"})
+            except WorkdayMaintenance:
+                log.warning("Workday is in its maintenance window (redirects to its maintenance page); "
+                            "skipping Workday discovery this run")
+                return []
             except Exception as e:
                 log.warning("%s: search failed (%s)", company, type(e).__name__)
                 break
