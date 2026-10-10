@@ -140,3 +140,11 @@ def test_skill_tenure_is_judged_against_real_years():
     assert yn("Do you have 3-5 years of experience in Python?") == "Yes"
     assert yn("Do you have at least 4 years of experience with LLMs?") == "No"
     assert yn("Do you have experience in Python?") == "Yes"
+
+
+def test_existing_covenant_is_a_fact_but_signing_one_is_the_persons_call():
+    p = dict(P, restrictive_covenant=False)
+    yn = lambda q: rule_answer(q, ["Yes", "No"], "radio", p)
+    a = yn("Have you entered into any restrictive covenant, non-compete agreement, or non-disclosure agreement?")
+    assert a is not None and a.selected_option_indices == [1]
+    assert yn("Are you willing to sign a non-compete?") is None

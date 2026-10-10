@@ -591,8 +591,10 @@ def cmd_company_apply(settings: Settings, args) -> int:
         line = line.strip()
         if not line or line.startswith("#"):
             continue
-        url, _, role = line.partition(" | ")            # optional "url | role" to say which role to apply for
-        entries.append((url.strip(), role.strip()))
+        # "apply_url | role | jd_url": role and jd_url are optional. jd_url is the posting itself, for when the
+        # apply link is a sign-in or embedded form page that does not contain the job description.
+        parts = [x.strip() for x in line.split(" | ")]
+        entries.append((parts[0], parts[1] if len(parts) > 1 else "", parts[2] if len(parts) > 2 else ""))
     # never submit twice: drop jobs already applied to (same URL, or same company + role)
     import csv as _csv
     from .tracker import SUBMITTED_STATUSES
@@ -600,15 +602,15 @@ def cmd_company_apply(settings: Settings, args) -> int:
                     if r.get("status") in SUBMITTED_STATUSES} if tracker.applications_csv.exists() else set()
     recent = tracker.recent_role_keys()
     kept = []
-    for url, role in entries:
+    for url, role, jd_url in entries:
         if url in applied_urls or (role and Tracker.role_key(company_from_url(url), role) in recent):
             log.info("skip (already applied): %s", url[:100]); continue
-        kept.append((url, role))
+        kept.append((url, role, jd_url))
     entries = kept
     Settings.browser_profile_dir = property(lambda self, d=args.browser_profile: STATE_DIR / d)
     with Browser(settings) as b:
         first = True
-        for url, role in entries:
+        for url, role, jd_url in entries:
             if url in applied_urls:                    # the same URL twice in one file
                 log.info("skip (already attempted this run): %s", url[:100]); continue
             applied_urls.add(url)
@@ -618,8 +620,13 @@ def cmd_company_apply(settings: Settings, args) -> int:
             log.info("=" * 60)
             log.info("%s", url[:110])
             try:
-                b.goto(url)
-                jd = b.body_text()
+                if jd_url:
+                    b.goto(jd_url)
+                    jd = b.body_text()
+                    b.goto(url)
+                else:
+                    b.goto(url)
+                    jd = b.body_text()
                 title = role or (b.page.locator("h1").first.inner_text().strip() if b.page.locator("h1").count() else "")
                 company = company_from_url(url)
                 pdf, rep = tailored_pdf(jd, title, company, playwright=b.pw, url=url)

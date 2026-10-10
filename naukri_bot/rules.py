@@ -135,7 +135,11 @@ def rule_answer(question: str, options: list[str], kind: str, profile: dict) -> 
     # ---- never decided on the candidate's behalf: health, disability, drug tests, money/time commitments.
     # Returning None defers the job to the person. Found by review on 9 Oct 2026: the willingness and consent
     # rules were answering "Yes" to medical exams, drug tests, 2-year bonds with penalties and unpaid work.
-    if SENSITIVE.search(q):
+    # ...except that "have you entered into / are you bound by a non-compete?" is a fact the profile records
+    # (restrictive_covenant); only "would you sign one?" is the person's call.
+    existing_covenant = re.search(r"non-?compete|restrictive covenant", q) and \
+        re.search(r"have you (ever )?(entered|signed|agreed)|are you (currently )?(bound|subject|party)|do you have (any )?(existing|current)", q)
+    if SENSITIVE.search(q) and not (existing_covenant and "restrictive_covenant" in profile):
         return None
 
     # ---- employer uses AI in hiring: consent (same as Coinbase's "may use AI tools", accepted 6 Oct 2026)

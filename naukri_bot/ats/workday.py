@@ -119,10 +119,22 @@ class WorkdayApplier:
     def run(self, url: str) -> WorkdayResult:
         pg = self.pg
         pg.goto(url, wait_until="domcontentloaded", timeout=60000)
-        if not self._visible(A("adventureButton"), timeout=20000):
+        cont = pg.locator("a:has-text('Continue Application'), button:has-text('Continue Application')")
+        if not self._visible(A("adventureButton") + ", a:has-text('Continue Application'), button:has-text('Continue Application')",
+                             timeout=20000):
             closed = self._visible(A("errorMessage")) or "doesn't exist" in pg.inner_text("body")
             self.result.status, self.result.notes = ("closed", "posting no longer exists") if closed else ("failed", "no Apply button")
             return self.result
+        if re.search(r"you('ve| have) (already )?applied|application submitted", pg.inner_text("body"), re.I):
+            self.result.status, self.result.notes = "applied", "already applied (Workday says so)"
+            return self.result
+        if cont.count() and cont.first.is_visible() and not pg.locator(A("adventureButton")).first.is_visible():
+            # an earlier run saved a partial application on this tenant: pick it up where it stopped
+            log.info("  continuing the saved application")
+            cont.first.click(); time.sleep(4)
+            if not self._auth() and not self._past_auth():
+                return self.result
+            return self._continue_steps()
         self._click(A("adventureButton"))
         time.sleep(3)
         # "Use My Last Application" is offered even to new accounts and then stalls at sign-in: prefer a fresh autofill
@@ -134,6 +146,11 @@ class WorkdayApplier:
                 break
         if not self._auth():
             return self.result
+        return self._continue_steps()
+
+    def _continue_steps(self) -> WorkdayResult:
+        """Walk the application steps after sign-in (fresh, or a saved application being continued)."""
+        pg = self.pg
         blank = recoveries = 0
         for _ in range(16):
             if re.search(r"something went wrong|please refresh the page", self.pg.inner_text("body"), re.I):
@@ -192,6 +209,19 @@ class WorkdayApplier:
             time.sleep(1.5)
         return False
 
+    def _email_route(self) -> None:
+        """Some tenants put an Apple / Google / 'Sign in with email' gate in front of the email form - at the start
+        (KLA) or again after Create Account (Thomson Reuters). Take the email route whenever it shows."""
+        pg = self.pg
+        for sel in (A("SignInWithEmailButton"), "button:has-text('Sign in with email')", "button:has-text('Sign In with Email')",
+                    "button:has-text('Continue with email')"):
+            b = pg.locator(sel)
+            try:
+                if b.count() and b.first.is_visible() and not pg.locator("input[type='password']").first.is_visible():
+                    b.first.click(); time.sleep(2); return
+            except Exception:
+                continue
+
     def _auth(self) -> bool:
         pg = self.pg
         # tenant cookie banners (Thomson Reuters) can sit over the Sign In button: dismiss them first
@@ -221,22 +251,38 @@ class WorkdayApplier:
                 log.info("  account created; now on: %s", self.step())
                 return True
         # account exists on this company's site (Create Account lands on a plain Sign In page), or sign-in was shown first
+        self._email_route()
         if self._visible(A("signInSubmitButton")) or self._visible(A("signInLink")):
             if not self._visible(A("signInSubmitButton")):
                 self._click(A("signInLink")); time.sleep(2)
+                self._email_route()
             log.info("  signing in as %s", self.email)
             self._sign_in()
             if self._wait_past_auth(20):
                 log.info("  signed in; now on: %s", self.step())
                 return True
-            if self._visible(A("createAccountLink")) and re.search(r"wrong email|might be locked|invalid", pg.inner_text("body"), re.I):
+            # no account here yet: most tenants say "wrong email or password", some (Thomson Reuters) say nothing
+            # and just stay on Sign In - in both cases try creating the account (an existing one is refused harmlessly)
+            if self._visible(A("createAccountLink")) and (re.search(r"wrong email|might be locked|invalid", pg.inner_text("body"), re.I)
+                                                          or self._visible(A("signInSubmitButton"), timeout=1000)):
                 log.info("  no account on this site yet: creating one")
                 self._click(A("createAccountLink")); time.sleep(3)
+                self._email_route()
+                if not self._visible(A("createAccountSubmitButton"), timeout=5000) and self._visible(A("createAccountLink"), timeout=2000):
+                    self._click(A("createAccountLink")); time.sleep(3)    # the gate led to Sign In: ask for Create Account again
                 if self._visible(A("createAccountSubmitButton"), timeout=10000):
                     self._create_account()
                     if self._wait_past_auth(20):
                         log.info("  account created; now on: %s", self.step())
                         return True
+                    # some tenants (Thomson Reuters) send a new account back to their sign-in gate: sign in now
+                    self._email_route()
+                    if self._visible(A("signInSubmitButton"), timeout=8000):
+                        log.info("  account created; signing in to it")
+                        self._sign_in()
+                        if self._wait_past_auth(25):
+                            log.info("  signed in; now on: %s", self.step())
+                            return True
         body = pg.inner_text("body").lower()
         if re.search(r"verify your (email|account)|verification (email|link)|check your email", body):
             self.result.status, self.result.notes = "needs_verification", "Workday sent a verification email; click it, then rerun"
@@ -273,13 +319,23 @@ class WorkdayApplier:
     def _sign_in(self) -> None:
         pg = self.pg
         self._visible(A("email"), timeout=15000)
-        pg.locator(A("email")).first.fill(self.email)
-        pg.locator(A("password")).first.fill(self.password)
+        # Type like a person: some tenants (Thomson Reuters, 10 Oct 2026) ignore values set with fill(), so the
+        # Sign In click silently does nothing with no error shown.
+        for aid, value in (("email", self.email), ("password", self.password)):
+            box = pg.locator(A(aid)).first
+            box.click(); box.fill("")
+            pg.keyboard.type(value, delay=35)
+        pg.keyboard.press("Tab"); time.sleep(0.5)
         filt = pg.locator(f"{A('click_filter')}[aria-label='Sign In'] >> visible=true")
         if filt.count():
             filt.first.click()
         else:
             self._click(A("signInSubmitButton"))
+        time.sleep(4)
+        if self._visible(A("signInSubmitButton"), timeout=1000) and not re.search(
+                r"wrong email|invalid|incorrect|might be locked", pg.inner_text("body"), re.I):
+            pg.locator(A("password")).first.click()       # click did not register: submit from the password field
+            pg.keyboard.press("Enter")
 
     def _upload_resume(self) -> None:
         """Attach this job's tailored resume, removing any file already attached (a previous application's
@@ -349,7 +405,8 @@ class WorkdayApplier:
         keep = pick(r"(kept|keep|retain).{0,60}(future|suitable|other) (roles|opportunit|positions|vacanc)|notify me of any suitable roles")
         if keep is not None and re.search(r"select one of the following|personal (information|data)|retention|how long", l + " " + " ".join(options), re.I):
             return keep
-        if p.get("no_conflicts_of_interest") and re.search(r"(engaged|involved) (or involved )?in any other business|any other business or employment|outside (business|employment) (activit|interest)", l):
+        if p.get("no_conflicts_of_interest") and re.search(r"(engaged|involved) (or involved )?in any other business|any other business or employment|outside (business|employment) (activit|interest)|outside employment or activit"
+                                                       r"|(continue|keep).{0,40}if (you are )?hired", l):
             return pick(r"^no\b")
         if re.search(r"answer .?yes.? if you have (ever )?been employed by|have (ever )?been employed by .{0,60}(subsidiar|group)", l):
             return pick(r"^no\b")
@@ -478,9 +535,13 @@ class WorkdayApplier:
                     picked = []
                     for _level in range(3):              # categories open a sub-list ("Job Board" -> "Naukri")
                         opts = self._popup_options()
+                        for _wait in range(8):           # the list often loads a moment after the click (Mastercard)
+                            if opts:
+                                break
+                            time.sleep(0.5); opts = self._popup_options()
                         names = [o.inner_text().strip() for o in opts]
-                        if not opts:
-                            break
+                        if not opts and (picked or not re.search(r"how did you hear|^source|citizenship|nationality|country", label, re.I)):
+                            break                        # nothing to choose (searchable fields fall through to typing)
                         idx = None if picked and re.search(r"how did you hear|^source", label, re.I) else self._choice_for(label, names)
                         if idx is None and not picked and re.search(r"citizenship|nationality|country", label, re.I):
                             # long country lists are virtualized: type to search, then choose from the filtered list
@@ -519,7 +580,19 @@ class WorkdayApplier:
                 elif radios.count():
                     if any(r.is_checked() for r in radios.all()):
                         continue
-                    names = [f.locator(f"label[for='{r.get_attribute('id')}']").inner_text().strip() if r.get_attribute("id") else "" for r in radios.all()]
+                    def radio_names():
+                        return [f.locator(f"label[for='{r.get_attribute('id')}']").inner_text().strip()
+                                if r.get_attribute("id") and f.locator(f"label[for='{r.get_attribute('id')}']").count() else ""
+                                for r in radios.all()]
+                    names = radio_names()
+                    for _wait in range(6):               # labels can render after the inputs (Mastercard, 10 Oct 2026)
+                        if all(names):
+                            break
+                        time.sleep(0.5); names = radio_names()
+                    if not all(names):                   # still blank: Yes/No groups carry value="true"/"false"
+                        vals = [(r.get_attribute("value") or "").lower() for r in radios.all()]
+                        if set(vals) <= {"true", "false"}:
+                            names = ["Yes" if v == "true" else "No" for v in vals]
                     idx = self._choice_for(label, names)
                     if idx is None:
                         self._unknown(label, names); continue
