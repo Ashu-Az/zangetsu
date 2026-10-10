@@ -142,3 +142,9 @@ def test_every_real_plan_runs_through_the_check():
         assert check_resume(r, corpus) == [], path.name             # what is left is grounded
         for u in dropped:
             print(f"{path.name}: {u}")
+
+
+def test_company_names_are_not_skills():
+    from naukri_bot.ats_score import extract_requirements
+    reqs = [r.lower() for r in extract_requirements("Our clients include American Express and Walmart. You know Python and LangChain.")]
+    assert "express" not in reqs and "python" in reqs

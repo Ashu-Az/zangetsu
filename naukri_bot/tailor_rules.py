@@ -115,7 +115,7 @@ def plan_path(company: str, title: str, url: str = "") -> Path | None:
 
 
 def tailored_pdf(jd_text: str, title: str, company: str, playwright=None, url: str = "",
-                 skills: list[str] | None = None) -> tuple[Path, dict]:
+                 skills: list[str] | None = None, compact: bool = False) -> tuple[Path, dict]:
     """Tailored PDF for one job and its report. Pass the job `url` so different postings with the same company and
     title get separate plan/PDF files (without it the old company_title naming is used)."""
     from .ats_score import report as ats_report, resume_text
@@ -136,5 +136,9 @@ def tailored_pdf(jd_text: str, title: str, company: str, playwright=None, url: s
     # recruiters see the file name: keep it clean
     who = safe_slug(data["core"]["name"], 40).replace("-", "_")
     path = out / f"{who}_{_job_stem(company, title, url)}.pdf"
+    if compact:                                    # email attachments: ~5 KB, built-in fonts, same content
+        from .resume_builder import compact_pdf
+        compact_pdf(r, path.with_name(path.stem + "_compact.pdf"))
+        return path.with_name(path.stem + "_compact.pdf"), report
     html_to_pdf(render_html(r), path, playwright=playwright)
     return path, report

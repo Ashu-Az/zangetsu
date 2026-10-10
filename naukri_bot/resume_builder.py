@@ -170,3 +170,61 @@ def build_resume_files(r: TailoredResume, job: JobPosting, out_dir: Path | None 
 
     log.info("Resume written: %s", files.get("pdf") or files["md"])
     return files
+
+
+def compact_pdf(r, path: Path) -> Path:
+    """A small, email-friendly PDF of the same resume: built-in Helvetica (no embedded fonts), A4, compressed.
+    Typically 5-10 KB instead of ~60 KB for the Chromium render, with identical content."""
+    from reportlab.lib import colors
+    from reportlab.lib.enums import TA_LEFT
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.lib.units import mm
+    from reportlab.platypus import HRFlowable, ListFlowable, ListItem, Paragraph, SimpleDocTemplate, Spacer
+    from xml.sax.saxutils import escape as esc
+
+    navy = colors.HexColor("#1f3a5f")
+    base = ParagraphStyle("base", fontName="Helvetica", fontSize=9.2, leading=11.6, alignment=TA_LEFT)
+    name = ParagraphStyle("name", parent=base, fontName="Helvetica-Bold", fontSize=17, leading=20, textColor=navy)
+    head = ParagraphStyle("head", parent=base, fontName="Helvetica-Bold", fontSize=10.2, leading=13, textColor=navy)
+    small = ParagraphStyle("small", parent=base, fontSize=8.6, leading=10.6, textColor=colors.HexColor("#444444"))
+    sect = ParagraphStyle("sect", parent=base, fontName="Helvetica-Bold", fontSize=9.6, leading=12, textColor=navy,
+                          spaceBefore=5, spaceAfter=1)
+    bullet = ParagraphStyle("bullet", parent=base, leftIndent=0)
+
+    def section(title):
+        return [Paragraph(title.upper(), sect), HRFlowable(width="100%", thickness=0.6, color=navy, spaceAfter=2)]
+
+    def bullets(items):
+        return ListFlowable([ListItem(Paragraph(esc(b), bullet), leftIndent=9, value="•") for b in items],
+                            bulletType="bullet", start="•", leftIndent=9, bulletFontSize=8)
+
+    story = [Paragraph(esc(r.name), name), Paragraph(esc(r.headline), head), Paragraph(esc(r.contact_line), small),
+             Spacer(1, 3)]
+    story += section("Professional Summary") + [Paragraph(esc(r.summary), base)]
+    story += section("Technical Skills")
+    for g in r.skills:
+        story.append(Paragraph(f"<b>{esc(g.name)}:</b> {esc(', '.join(g.items))}", base))
+    story += section("Professional Experience")
+    for e in r.experience:
+        right = f"  <font color='#555555'>{esc(e.dates)}</font>" if getattr(e, "dates", "") else ""
+        story.append(Paragraph(f"<b>{esc(e.title)}</b> | {esc(e.company)}"
+                               + (f", {esc(e.location)}" if getattr(e, "location", "") else "") + right, base))
+        story.append(bullets(e.bullets))
+        story.append(Spacer(1, 2))
+    if r.projects:
+        story += section("Projects")
+        story.append(bullets([f"{p.name}: {p.description}" + (f" ({p.link})" if getattr(p, "link", "") else "")
+                              for p in r.projects]))
+    if r.education:
+        story += section("Education")
+        for ed in r.education:
+            parts = [getattr(ed, "degree", ""), getattr(ed, "institution", "") or getattr(ed, "school", "")]
+            story.append(Paragraph(f"<b>{esc(' | '.join(x for x in parts if x))}</b>"
+                                   + (f"  <font color='#555555'>{esc(ed.dates)}</font>" if getattr(ed, "dates", "") else ""), base))
+    if r.certifications:
+        story += section("Certifications & Achievements") + [bullets(r.certifications)]
+    doc = SimpleDocTemplate(str(path), pagesize=A4, leftMargin=13 * mm, rightMargin=13 * mm, topMargin=11 * mm,
+                            bottomMargin=11 * mm, title=f"{r.name} - Resume", author=r.name, pageCompression=1)
+    doc.build(story)
+    return path

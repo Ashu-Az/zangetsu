@@ -138,9 +138,16 @@ def _dedupe(terms: list[str]) -> list[str]:
     return out
 
 
+NOT_SKILLS = re.compile(r"(?i)\bamerican express\b|\bexpress (scripts|employment|delivery|logistics|entry)\b|"
+                        r"\bcapital one\b|\bnext (education|gen)\b|\breact(ion|ive)\b")
+
+
 def extract_requirements(jd_text: str) -> list[str]:
     """Hard-skill keywords the job description asks for: curated tech vocabulary found in the JD (requirement
     sections first when the JD has them) plus the items of any 'Key skills:' line."""
+    # company and product names that contain a tech word are not skills ("American Express" is not Express.js;
+    # seen in a client list, 10 Oct 2026)
+    jd_text = NOT_SKILLS.sub(" ", jd_text or "")
     sec = _sections(jd_text)
     ordered = (_vocab_in(sec["must"]) + _vocab_in(sec["nice"]) + _vocab_in(sec["other"])) if sec["found"] else _vocab_in(jd_text)
     return _dedupe(ordered + _key_skill_lines(jd_text))

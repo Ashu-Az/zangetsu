@@ -256,7 +256,8 @@ def run(settings: Settings, profile: dict, send: bool, max_n: int, sources: list
     results = []
     try:
         for i, lead in enumerate(leads):
-            pdf, rep = tailored_pdf(lead.jd, lead.title, lead.company, playwright=playwright, url=lead.url or lead.email)
+            pdf, rep = tailored_pdf(lead.jd, lead.title, lead.company, playwright=playwright, url=lead.url or lead.email,
+                                    compact=True)
             coverage = rep.get("coverage") or {"matched": rep.get("ats_hit", [])}
             subject, body = compose(lead, profile, coverage)
             msg = build_message(lead, profile, sender or profile.get("email", ""), subject, body, Path(pdf))
