@@ -711,8 +711,11 @@ def refresh(browser, force: bool = False) -> tuple[bool, str]:
     # trailing full stop: the content stays the same, but Naukri records an update.
     browser.goto(PROFILE_URL, settle=(4, 5))
     page = browser.page
-    drawer = _open_drawer(page, "lazyResumeHead")
-    current = " ".join(drawer.locator("#resumeHeadlineTxt").input_value().split())
+    try:
+        drawer = _open_drawer(page, "lazyResumeHead")
+        current = " ".join(drawer.locator("#resumeHeadlineTxt").input_value(timeout=15000).split())
+    except Exception as e:                       # drawer slow or layout changed: skip this refresh, try next time
+        return False, f"could not open the headline editor ({type(e).__name__}); not touching it"
     page.keyboard.press("Escape"); pause(1.0, 1.5)
     if len(current) < 20:
         return False, "could not read the current headline; not touching it"

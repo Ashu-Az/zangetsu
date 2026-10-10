@@ -8,6 +8,7 @@
 """
 from __future__ import annotations
 
+import random
 import argparse
 from pathlib import Path
 import json
@@ -886,6 +887,8 @@ def cmd_early_access(settings: Settings, args) -> int:
             tracker.record_application(job, "early_access", "interest_shared", remember=False)
             shared += 1
             log.info("  shared interest %d: %s", shared, tag)
+            # a person reads the next card before clicking: 6-20 s, now and then a longer look
+            pause(6, 20) if random.random() > 0.15 else pause(25, 60)
     log.info("early access: shared interest in %d role(s)", shared)
     return 0
 
