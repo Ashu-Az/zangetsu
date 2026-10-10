@@ -805,6 +805,84 @@ def cmd_top_company_sites(settings: Settings, args) -> int:
     return 0
 
 
+EARLY_URL = "https://www.naukri.com/mnjuser/recommended-earjobs"
+def _parse_early_card(text: str) -> dict | None:
+    lines = [l.strip() for l in text.split("\n") if l.strip()]
+    exp_i = next((i for i, l in enumerate(lines) if re.fullmatch(r"\d+\s*-\s*\d+\s*Yrs", l)), None)
+    if exp_i is None or not lines:
+        return None
+    salary = lines[exp_i + 1] if exp_i + 1 < len(lines) else ""
+    loc = lines[exp_i + 2] if exp_i + 2 < len(lines) else ""
+    try:
+        end = lines.index("Hiring for one of these companies")
+    except ValueError:
+        end = len(lines)
+    return {"title": lines[0], "company": lines[2] if len(lines) > 2 else "", "experience": lines[exp_i].replace("Yrs", "Years"),
+            "salary": salary if "Lacs" in salary or "disclosed" in salary.lower() else "", "location": loc,
+            "skills": lines[exp_i + 3:end]}
+
+
+_EARLY_BTNS = "[...document.querySelectorAll('*')].filter(e => e.childElementCount === 0 && e.innerText && e.innerText.trim() === 'Share interest')"
+_EARLY_TEXTS_JS = "() => " + _EARLY_BTNS + """.map(btn => { let n = btn; for (let i = 0; i < 12 && n.parentElement; i++) { n = n.parentElement;
+    if (/\\d+\\s*-\\s*\\d+\\s*Yrs/.test(n.innerText) && n.innerText.split('Share interest').length === 2) return n.innerText; } return ''; })"""
+_EARLY_CLICK_JS = "i => { const bs = " + _EARLY_BTNS + "; bs[i].scrollIntoView({block: 'center'}); bs[i].click(); return bs.length; }"
+
+
+def cmd_early_access(settings: Settings, args) -> int:
+    """Naukri Pro 'Early access roles': share interest in every role that passes the usual filters.
+
+    A shared card leaves the list and Naukri re-renders the page, so each round reloads the list, reads every card
+    in one pass, and clicks the first matching one (about 4 s per role)."""
+    from .ranking import eligibility
+    profile, tracker = load_profile(), Tracker(read_only=args.dry_run)
+    skip: set[tuple] = set()
+    shared = 0
+    with Browser(settings) as b:
+        if not b.ensure_logged_in():
+            log.error("Not logged in to Naukri."); return 1
+        pg = b.page
+        while shared < args.max:
+            pg.goto(EARLY_URL, wait_until="domcontentloaded")
+            try:
+                pg.wait_for_selector("text=Share interest", timeout=20000)
+            except Exception:
+                log.info("no early-access roles on the page"); break
+            for _ in range(6):                                  # the list renders lazily
+                pg.mouse.wheel(0, 3000); pause(0.3, 0.5)
+            texts = pg.evaluate(_EARLY_TEXTS_JS)
+            pick = None
+            for i, text in enumerate(texts):
+                info = _parse_early_card(text)
+                if not info:
+                    continue
+                key = (info["title"], info["experience"], info["salary"], info["location"][:30])
+                if key in skip:
+                    continue
+                job = JobPosting(job_id="early:" + re.sub(r"[^a-z0-9]+", "-", " ".join(key).lower())[:150], url=EARLY_URL,
+                                 title=info["title"], experience=info["experience"], salary=info["salary"],
+                                 location=info["location"], skills=info["skills"])
+                reason = eligibility(job, ApplyMode.NAUKRI, settings, profile)
+                if not reason and re.search(r"\b(sr\.?|senior)\b", info["title"], re.I):
+                    reason = "senior_title"
+                skip.add(key)
+                if reason:
+                    log.debug("  skip %s (%s)", info["title"], reason); continue
+                pick = (i, job)
+                break
+            if not pick:
+                log.info("no more matching roles (%d left on the page)", len(texts)); break
+            i, job = pick
+            tag = f"{job.title[:40]} | {job.experience} | {job.salary}"
+            if args.dry_run:
+                log.info("  would share interest: %s", tag); continue
+            pg.evaluate(_EARLY_CLICK_JS, i); pause(2, 3)
+            tracker.record_application(job, "early_access", "interest_shared", remember=False)
+            shared += 1
+            log.info("  shared interest %d: %s", shared, tag)
+    log.info("early access: shared interest in %d role(s)", shared)
+    return 0
+
+
 def cmd_refresh(settings: Settings, args) -> int:
     """Re-save the Naukri headline so the profile shows as updated today (run 2-3 times a day)."""
     from . import naukri_profile
@@ -879,6 +957,9 @@ def main(argv: list[str] | None = None) -> None:
     tc.add_argument("--days", type=int, default=7, help="posted within this many days")
     tc.add_argument("--roles", default="software engineer, ai engineer", help="comma-separated role searches per company")
     tc.add_argument("--dry-run", action="store_true")
+    ea = sub.add_parser("early-access", help="Naukri Pro early-access roles: share interest in ones that pass the filters")
+    ea.add_argument("--max", type=int, default=10)
+    ea.add_argument("--dry-run", action="store_true")
     rf = sub.add_parser("refresh", help="re-save the Naukri headline so the profile shows as updated today")
     rf.add_argument("--force", action="store_true", help="ignore the 3-hour minimum gap")
     le = sub.add_parser("leads", help="LinkedIn hiring posts -> leads CSV + outreach drafts (nothing is sent)")
@@ -890,5 +971,5 @@ def main(argv: list[str] | None = None) -> None:
     args = p.parse_args(argv)
     setup_logging(args.verbose)
     settings = Settings()
-    cmd = {"login": cmd_login, "run": cmd_run, "scrape": cmd_scrape, "tailor": cmd_tailor, "ask": cmd_ask, "profile": cmd_profile, "portal": cmd_portal, "leads": cmd_leads, "workday": cmd_workday, "workday-run": cmd_workday_run, "company-apply": cmd_company_apply, "refresh": cmd_refresh, "nvites": cmd_nvites, "top-company-sites": cmd_top_company_sites}[args.cmd]
+    cmd = {"login": cmd_login, "run": cmd_run, "scrape": cmd_scrape, "tailor": cmd_tailor, "ask": cmd_ask, "profile": cmd_profile, "portal": cmd_portal, "leads": cmd_leads, "workday": cmd_workday, "workday-run": cmd_workday_run, "company-apply": cmd_company_apply, "refresh": cmd_refresh, "nvites": cmd_nvites, "top-company-sites": cmd_top_company_sites, "early-access": cmd_early_access}[args.cmd]
     sys.exit(cmd(settings, args))
