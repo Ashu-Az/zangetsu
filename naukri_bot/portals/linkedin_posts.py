@@ -69,11 +69,8 @@ JUNK = re.compile(r"\b(intern(ship)?|trainee|fresher|support|sales|recruiter|hr\
 
 
 def _signature(profile: dict) -> str:
-    """Name, phone and links from profile.yaml (never hardcoded)."""
-    links = profile.get("links") or {}
-    contact = " · ".join(x for x in [profile.get("phone", ""),
-                                      links.get("linkedin", "").replace("https://www.", ""),
-                                      links.get("github", "").replace("https://", "")] if x)
+    """Name, phone and email from profile.yaml (no links: Gmail rewrites them into google.com/url redirects)."""
+    contact = " | ".join(x for x in [profile.get("phone", ""), profile.get("email", "")] if x)
     return f"{profile.get('name', '')}\n{contact}"
 
 

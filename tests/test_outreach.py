@@ -28,3 +28,4 @@ def test_greeting_and_body_use_only_profile_facts():
     subject, body = compose(lead, profile, {"matched": ["Python", "FastAPI", "RAG"]})
     assert subject == "Application for AI Engineer - Rohan Mehta (2 yrs, 30-day notice)"
     assert "Python, FastAPI and RAG" in body and "Built a RAG assistant" in body and "30 days" in body
+    assert "http" not in body                      # signature: phone and email only, no links

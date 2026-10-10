@@ -217,8 +217,8 @@ def compose(lead: Lead, profile: dict, coverage: dict) -> tuple[str, str]:
         "",
         "Thanks,",
         name,
-        " | ".join(x for x in [profile.get("phone", ""), (profile.get("links") or {}).get("linkedin", ""),
-                               (profile.get("links") or {}).get("github", "")] if x),
+        # phone and email only: Gmail rewrites links in plain-text mail into long google.com/url redirects
+        " | ".join(x for x in [profile.get("phone", ""), profile.get("email", "")] if x),
     ])
     return subject, re.sub(r"\n{3,}", "\n\n", body)
 
