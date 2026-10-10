@@ -37,3 +37,24 @@ def test_only_naukri_rows_use_naukri_quota(tmp_path):
         t.record_application(_job(i, company=f"C{i}"), mode, "applied", remember=False)
     assert t.applied_today("naukri") == 2
     assert t.applied_last_24h("naukri") == 2
+
+
+def test_nvite_remote_location_is_not_work_mode():
+    from naukri_bot.nvites import parse_details
+    text = "SDE - Remote\nRemote\n1 - 6 Years5 - 13 Lacs pa\nJob description\nBuild backend APIs in Python."
+    skills, jd = parse_details(text)
+    assert skills == [] and "Python" in jd
+    skills, _ = parse_details("AI Engineer\nHybrid\nPython, FastAPI, LLM\nJob description\nx")
+    assert skills == ["Python", "FastAPI", "LLM"]
+
+
+def test_between_applies_takes_breaks(monkeypatch):
+    import types
+    from naukri_bot import humanize
+    slept = []
+    monkeypatch.setattr(humanize.time, "sleep", slept.append)
+    s = types.SimpleNamespace(min_delay=12, max_delay=40, break_min=120, break_max=360)
+    for _ in range(30):
+        humanize.between_applies(s)
+    assert all(g >= 12 for g in slept)
+    assert sum(g >= 120 for g in slept) >= 4          # a 2-6 min break every 4-7 applies

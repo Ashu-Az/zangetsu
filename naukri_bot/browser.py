@@ -185,4 +185,5 @@ class Browser:
         return True
 
     def random_idle(self) -> None:
-        time.sleep(random.uniform(self.settings.min_delay, self.settings.max_delay))
+        from .humanize import between_applies
+        between_applies(self.settings)

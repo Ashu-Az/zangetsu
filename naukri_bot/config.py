@@ -55,6 +55,8 @@ class Settings:
     login_wait_seconds: int = field(default_factory=lambda: _env_int("LOGIN_WAIT_SECONDS", 240))
     min_delay: float = field(default_factory=lambda: float(_env("MIN_DELAY", "6")))
     max_delay: float = field(default_factory=lambda: float(_env("MAX_DELAY", "15")))
+    break_min: float = field(default_factory=lambda: float(_env("BREAK_MIN", "120")))   # short break every 4-7 applies
+    break_max: float = field(default_factory=lambda: float(_env("BREAK_MAX", "360")))
     browser_executable: str = field(default_factory=lambda: _env("BROWSER_EXECUTABLE"))
 
     @property

@@ -12,6 +12,8 @@ from ..models import ApplyMode, JobCard, JobPosting
 from ..ranking import eligibility, sort_key, too_old, title_excluded, title_included, company_excluded, dedupe_company_title
 from ..tracker import Tracker
 
+from ..humanize import between_applies
+
 log = logging.getLogger(__name__)
 
 
@@ -165,7 +167,7 @@ class Portal:
             if apply_failures >= 3:
                 log.error("[%s] 3 applications in a row failed: stopping this portal (layout change?)", self.name)
                 break
-            time.sleep(random.uniform(self.settings.min_delay, self.settings.max_delay))
+            between_applies(self.settings)
         return stats
 
     def _tid(self, job_id: str) -> str:

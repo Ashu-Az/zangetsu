@@ -70,7 +70,8 @@ def parse_details(text: str) -> tuple[list[str], str]:
     lines = [l.strip() for l in text.split("\n") if l.strip()]
     skills: list[str] = []
     for i, line in enumerate(lines):
-        if WORK_MODE.match(line) and i + 1 < len(lines):
+        # a "Remote" location also matches WORK_MODE; the line after it is then experience/salary, not skills
+        if WORK_MODE.match(line) and i + 1 < len(lines) and not EXP_LINE.match(lines[i + 1]):
             skills = [s.strip() for s in lines[i + 1].split(",") if s.strip()]
             break
     jd = text.split("Job description", 1)[1].strip() if "Job description" in text else ""
