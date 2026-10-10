@@ -621,6 +621,7 @@ class GenericFormApplier:
             except Exception as e:
                 log.warning("    dropdown error: %s", str(e)[:100])
         self._checkbox_groups()
+        self._toggle_groups()
         # radio groups
         names = {r.get_attribute("name") for r in pg.locator("input[type='radio']").all() if r.is_visible()}
         for n in filter(None, names):
@@ -634,6 +635,40 @@ class GenericFormApplier:
             if pick is None:
                 self._unknown(q, opts); continue
             group.nth(opts.index(pick)).check(force=True); self._note(q, pick, "rules")
+
+    def _toggle_groups(self) -> None:
+        """Ashby (and others) render yes/no questions as two toggle buttons, not radios (Cerebras' required 'Open to
+        relocation if necessary', 10 Oct 2026). Answer them from the profile through the rule engine."""
+        groups = self.pg.evaluate("""() => {
+          const out = []; const seen = new Set();
+          for (const b of document.querySelectorAll('button')) {
+            if (!/^(yes|no)$/i.test((b.innerText || '').trim())) continue;
+            const box = b.parentElement; if (!box || seen.has(box)) continue;
+            const bs = [...box.children].filter(x => x.tagName === 'BUTTON' && /^(yes|no)$/i.test((x.innerText || '').trim()));
+            if (bs.length !== 2) continue;
+            seen.add(box);
+            let q = '', n = box;
+            for (let i = 0; i < 4 && n && !q; i++) { n = n.parentElement; const l = n && n.querySelector('label'); if (l) q = l.innerText; }
+            const sel = bs.some(x => x.getAttribute('aria-pressed') === 'true' || x.getAttribute('aria-checked') === 'true'
+                                     || /(^|[_-])(active|selected|checked)/i.test(x.className));
+            box.setAttribute('data-zg-toggle', String(out.length));
+            out.push({q: (q || '').replace(/\s+/g, ' ').trim(), sel});
+          }
+          return out; }""")
+        for i, g in enumerate(groups):
+            if g["sel"] or not g["q"]:
+                continue
+            ans = rule_answer(g["q"].rstrip("*: "), ["Yes", "No"], "radio", self.profile)
+            pick = ans.answer_text if ans and ans.selected_option_indices else None
+            if pick is None:
+                if "*" in g["q"]:
+                    self._unknown(g["q"], ["Yes", "No"])
+                continue
+            try:
+                self.pg.locator(f"[data-zg-toggle='{i}'] > button", has_text=pick).first.click(); time.sleep(0.4)
+                self._note(g["q"], pick, "rules")
+            except Exception as e:
+                log.warning("    toggle error: %s", str(e)[:100]); self._unknown(g["q"], ["Yes", "No"])
 
     def _checkbox_groups(self) -> None:
         """Greenhouse renders checkbox questions as <fieldset><legend>question</legend> with styled (hidden) inputs:
@@ -686,6 +721,17 @@ class GenericFormApplier:
         if not options:
             return None
         l = label.lower()
+        # US export-control (EAR) citizenship check (Cerebras, chip and defence-adjacent firms): a factual answer from
+        # profile.nationality - never "U.S. person" for a non-US national
+        if re.search(r"export administration|\bu\.?s\.? person\b|deemed export", l + " " + " ".join(options), re.I):
+            nat = (self.profile.get("nationality") or "").lower()
+            if nat and not re.search(r"\b(american|united states|u\.?s\.?)\b", nat):
+                sanctioned = bool(re.search(r"cuba|iran|north korea|syria", nat))
+                want = (r"not a u\.?s\.? person.{0,40}\bam a\b" if sanctioned else
+                        r"not a u\.?s\.? person.{0,40}(not a current|am not a citizen|not a citizen)")
+                hit = next((o for o in options if re.search(want, o, re.I)), None)
+                if hit:
+                    return hit
         handled, val = self._school_level(l)
         if handled or self._needs_person(l) or (WORK_AUTH_Q.search(l) and not CANDIDATE_COUNTRY_Q.search(l)):
             want = val if handled else None if self._needs_person(l) else self._work_auth_value(l)
@@ -1048,8 +1094,14 @@ class GenericFormApplier:
                       const w = e.closest('.field-wrapper, fieldset, .input-wrapper, div');
                       const l = w && w.querySelector('label, legend');
                       return ((l && l.innerText.trim().slice(0, 50)) || '?') + ': ' + e.innerText.trim().slice(0, 60); })""")
+                still_open = self._find_submit() is not None
                 if errs:
                     self.result.status, self.result.notes = "needs_you", "form rejected, NOT submitted: " + "; ".join(errs[:5])
+                elif still_open and self.pg.locator("script[src*='recaptcha'], iframe[src*='recaptcha']").count():
+                    # An invisible reCAPTCHA (Ashby) silently drops automated submits: the form is still there, filled.
+                    # Not worked around on purpose - the person presses Submit (company-apply --hold keeps it open).
+                    self.result.status, self.result.notes = "needs_you", ("NOT submitted: the site's invisible bot check blocked "
+                                                                          "the automated Submit; the form is filled - press Submit yourself")
                 else:
                     self.result.status, self.result.notes = "unconfirmed", "pressed Submit but saw no confirmation (do NOT resubmit blindly)"
         return self.result
