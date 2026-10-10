@@ -27,14 +27,30 @@ LABEL_JS = r"""e => {
   const lb = e.getAttribute('aria-labelledby');
   if (lb) { const t = lb.split(' ').map(i => (document.getElementById(i) || {}).innerText || '').join(' '); if (ok(t)) return clean(t); }
   const wrap = e.closest('label'); if (wrap && ok(wrap.innerText)) return clean(wrap.innerText);
-  // climb: the nearest ancestor that holds a label-like element with real words (Zoho puts it ~6 levels up)
+  // climb: the nearest ancestor that holds a label-like element with real words (Zoho puts it ~6 levels up).
+  // Within that ancestor take the label just BEFORE the field: on multi-field rows (PyjamaHR) the first label in
+  // a wide ancestor belongs to another field ("Contact Number" for First Name). Past two levels a descriptive
+  // placeholder ("First Name", "Notice Period") is the better witness than a far-away label.
+  const ph = e.placeholder;
+  const before = l => l.compareDocumentPosition(e) & Node.DOCUMENT_POSITION_FOLLOWING;
+  // a label with another visible field between it and `e` belongs to that field ("Phone" is not the City's label)
+  const owned = (l, root) => [...root.querySelectorAll('input:not([type=hidden]), select, textarea')].some(c =>
+    c !== e && (l.compareDocumentPosition(c) & Node.DOCUMENT_POSITION_FOLLOWING) && (c.compareDocumentPosition(e) & Node.DOCUMENT_POSITION_FOLLOWING));
+  // last resort: a descriptive name/id ("Current_CTC_in_lakhs" -> "Current CTC in lakhs")
+  const nm = (e.name || e.id || '').replace(/[_-]+/g, ' ').replace(/([a-z])([A-Z])/g, '$1 $2').replace(/\b(mui|input|react select)\b.*$/i, '').trim();
+  const named = /[A-Za-z]{3,}\s+[A-Za-z]{2,}/.test(nm) ? nm : '';
   let p = e.parentElement;
   for (let i = 0; i < 8 && p; i++, p = p.parentElement) {
+    if (i === 2 && ok(ph) && !/^(select|search|type|enter here)/i.test(ph)) return clean(ph);
     const cands = [...p.querySelectorAll('label, legend, [class*=label], [class*=Label]')].filter(l => !l.contains(e) && ok(l.innerText));
-    if (cands.length) return clean(cands[0].innerText);
+    if (!cands.length) continue;
+    const prev = cands.filter(l => before(l) && !owned(l, p));
+    if (prev.length && prev[prev.length - 1].innerText.trim().length > 3) return clean(prev[prev.length - 1].innerText);
+    if (!cands.some(before)) return clean(cands[0].innerText);   // label after the field (radio/checkbox text)
+    break;                                                        // nearby labels all belong to other fields
   }
-  const ph = e.placeholder; if (ok(ph)) return clean(ph);
-  return '';
+  if (ok(ph) && !/^(select|search)/i.test(ph)) return clean(ph);
+  return named;
 }"""
 
 # Statements that are (or may be) legal claims about the candidate: never auto-ticked or auto-confirmed.

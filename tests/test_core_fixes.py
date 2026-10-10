@@ -63,4 +63,13 @@ def test_steady_pacing(monkeypatch):
     for _ in range(40):
         clock[0] += 1.0                           # the page work itself took a second
         humanize.steady_wait(s)
-    assert slept and all(7 <= g + 1.0 <= 14 for g in slept)   # every gap 8-14 s, no bursts, no long breaks
+    assert slept and all(7.999 <= g + 1.0 <= 14.001 for g in slept)   # every gap 8-14 s, no bursts, no long breaks
+
+
+def test_saved_for_manual_does_not_block_company_apply(tmp_path):
+    from naukri_bot.tracker import Tracker
+    t = Tracker.__new__(Tracker)
+    t.applications_csv = tmp_path / "a.csv"
+    t.applications_csv.write_text("timestamp,company,title,status\n2099-01-01T00:00:00,Prodigal,Forward Deployed Engineer,saved_for_manual\n")
+    assert Tracker.role_key("Prodigal", "Forward Deployed Engineer") in t.recent_role_keys()
+    assert not t.recent_role_keys(include_saved=False)

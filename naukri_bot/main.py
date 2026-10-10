@@ -601,7 +601,7 @@ def cmd_company_apply(settings: Settings, args) -> int:
     from .tracker import SUBMITTED_STATUSES
     applied_urls = {r.get("url", "").strip() for r in _csv.DictReader(open(tracker.applications_csv, newline="", encoding="utf-8"))
                     if r.get("status") in SUBMITTED_STATUSES} if tracker.applications_csv.exists() else set()
-    recent = tracker.recent_role_keys()
+    recent = tracker.recent_role_keys(include_saved=False)   # a job saved for manual apply is exactly what this applies to
     kept = []
     for url, role, jd_url in entries:
         if url in applied_urls or (role and Tracker.role_key(company_from_url(url), role) in recent):

@@ -105,8 +105,8 @@ class Tracker:
         company = re.sub(r"\b(limited|ltd|pvt|private|inc|llp|technologies|solutions)\b", "", norm(company)).strip()
         return f"{company}|{norm(title)}"
 
-    def recent_role_keys(self, days: int = 30) -> set[str]:
-        """company+title of everything applied to or saved in the last `days` days, on any portal. Companies repost
+    def recent_role_keys(self, days: int = 30, include_saved: bool = True) -> set[str]:
+        """company+title of everything applied to (and, with include_saved, saved for manual) in the last `days` days, on any portal. Companies repost
         one role under several job ids (Infosys: one per city group), so the job id alone does not catch repeats."""
         if not self.applications_csv.exists():
             return set()
@@ -114,7 +114,8 @@ class Tracker:
         since = (datetime.now() - timedelta(days=days)).isoformat()
         with open(self.applications_csv, newline="", encoding="utf-8") as f:
             return {self.role_key(r.get("company", ""), r.get("title", "")) for r in csv.DictReader(f)
-                    if r.get("timestamp", "") >= since and r.get("status") in SUBMITTED_STATUSES + ("saved_for_manual",)}
+                    if r.get("timestamp", "") >= since
+                    and r.get("status") in SUBMITTED_STATUSES + ((("saved_for_manual",)) if include_saved else ())}
 
     def is_seen(self, job_id: str) -> bool:
         """True if the job needs no further attempt. failed / deferred jobs come back after
