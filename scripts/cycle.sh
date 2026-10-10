@@ -18,6 +18,8 @@ PY=.venv/bin/python
   $PY -m naukri_bot run --source all --max 30 --only naukri --no-llm --assist --max-applicants 100000 &
   $PY -m naukri_bot portal hirist --max 15 &
   wait
+  # 3b. recruiter emails with a tailored resume (sends only with GMAIL_APP_PASSWORD set, else writes drafts)
+  $PY -m naukri_bot outreach --send --max 8
   # 4. priority companies' Naukri postings that apply on the company site -> inputs/naukri-top-company-sites.txt
   $PY -m naukri_bot top-company-sites --companies 12
   # 5. Workday top companies, newest first, tailored resume per JD

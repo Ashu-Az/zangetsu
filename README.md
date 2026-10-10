@@ -185,6 +185,7 @@ When a posting's button says "Apply on company site", the bot captures the redir
 | 2. Recruiter invitations | `nvites` | Reads Naukri NVites (`/mnjuser/inbox`), skips ones already applied, applies the normal filters, applies in-pane with the questionnaire handler. Invites that only link to an employer form are saved to `inputs/naukri-nvite-forms.txt`. |
 | 3. Portals | `run`, `portal hirist` | Keyword search, recommended jobs, ranked by applicant count. |
 | 4. Top companies on Naukri | `top-company-sites` | For each `priority_companies` entry (rotating, 12-15 per run), searches Naukri for *role at company* (`/software-engineer-jobs?k=software engineer, walmart`), keeps fitting postings that apply on the company site, and writes their employer links to `inputs/naukri-top-company-sites.txt`. |
+| 4b. Recruiter email | `outreach` | Recruiters who ask for resumes by email (Naukri JDs, LinkedIn posts; obfuscated addresses like "hr [at] x [dot] com" included) get a short email with a resume tailored to their posting. Never the same address twice, one email per company domain per 30 days, a closer experience fit than for applies, lookalike domains skipped, daily cap, 45-90 s between sends. Sends through Gmail with an App Password; without one it writes `.eml` drafts to `output/outreach/<date>/`. |
 | 5. Career sites | `workday-run`, `company-apply` | Workday tenants and Greenhouse/Lever/Ashby boards are surveyed directly; links from stages 2 and 4 are added. Each job gets a tailored resume, a keyword-coverage report, and the right form adapter. |
 
 ### Tailoring, grounding and the coverage score
@@ -364,6 +365,7 @@ python -m naukri_bot workday-run --days 3 --max 8 [--submit]   # Workday tenants
 python -m naukri_bot workday <url> [--submit]             # one Workday application
 python -m naukri_bot company-apply --file inputs/naukri-top-company-sites.txt [--submit] [--hold]
 python -m naukri_bot leads                      # LinkedIn hiring posts -> leads CSV + outreach drafts (nothing sent)
+python -m naukri_bot outreach [--send] [--max 8]   # email recruiters a tailored resume (drafts without --send)
 ```
 
 Run inputs (URL lists, one-off scripts) live in `inputs/`, which is gitignored.

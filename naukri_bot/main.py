@@ -890,6 +890,18 @@ def cmd_early_access(settings: Settings, args) -> int:
     return 0
 
 
+def cmd_outreach(settings: Settings, args) -> int:
+    """Email recruiters (Naukri JDs and LinkedIn posts that ask for resumes by email) with a tailored resume."""
+    from playwright.sync_api import sync_playwright
+    from . import outreach
+    sources = [s.strip() for s in args.sources.split(",") if s.strip()]
+    with sync_playwright() as pw:
+        results = outreach.run(settings, load_profile(), send=args.send, max_n=args.max, sources=sources, playwright=pw)
+    sent = sum(r["status"] == "emailed" for r in results)
+    log.info("outreach: %d emailed, %d drafted -> %s", sent, len(results) - sent, outreach.OUT_DIR)
+    return 0
+
+
 def cmd_refresh(settings: Settings, args) -> int:
     """Re-save the Naukri headline so the profile shows as updated today (run 2-3 times a day)."""
     from . import naukri_profile
@@ -967,6 +979,10 @@ def main(argv: list[str] | None = None) -> None:
     ea = sub.add_parser("early-access", help="Naukri Pro early-access roles: share interest in ones that pass the filters")
     ea.add_argument("--max", type=int, default=10)
     ea.add_argument("--dry-run", action="store_true")
+    ou = sub.add_parser("outreach", help="email recruiters a tailored resume (drafts unless --send)")
+    ou.add_argument("--send", action="store_true", help="send through Gmail (needs GMAIL_ADDRESS and GMAIL_APP_PASSWORD)")
+    ou.add_argument("--max", type=int, default=10)
+    ou.add_argument("--sources", default="naukri,linkedin")
     rf = sub.add_parser("refresh", help="re-save the Naukri headline so the profile shows as updated today")
     rf.add_argument("--force", action="store_true", help="ignore the 3-hour minimum gap")
     le = sub.add_parser("leads", help="LinkedIn hiring posts -> leads CSV + outreach drafts (nothing is sent)")
@@ -978,5 +994,5 @@ def main(argv: list[str] | None = None) -> None:
     args = p.parse_args(argv)
     setup_logging(args.verbose)
     settings = Settings()
-    cmd = {"login": cmd_login, "run": cmd_run, "scrape": cmd_scrape, "tailor": cmd_tailor, "ask": cmd_ask, "profile": cmd_profile, "portal": cmd_portal, "leads": cmd_leads, "workday": cmd_workday, "workday-run": cmd_workday_run, "company-apply": cmd_company_apply, "refresh": cmd_refresh, "nvites": cmd_nvites, "top-company-sites": cmd_top_company_sites, "early-access": cmd_early_access}[args.cmd]
+    cmd = {"login": cmd_login, "run": cmd_run, "scrape": cmd_scrape, "tailor": cmd_tailor, "ask": cmd_ask, "profile": cmd_profile, "portal": cmd_portal, "leads": cmd_leads, "workday": cmd_workday, "workday-run": cmd_workday_run, "company-apply": cmd_company_apply, "refresh": cmd_refresh, "nvites": cmd_nvites, "top-company-sites": cmd_top_company_sites, "early-access": cmd_early_access, "outreach": cmd_outreach}[args.cmd]
     sys.exit(cmd(settings, args))

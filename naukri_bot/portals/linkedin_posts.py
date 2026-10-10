@@ -33,6 +33,22 @@ COLUMNS = ["found_at", "post_age", "author", "author_url", "author_is_person", "
 
 POST = "[data-view-name='feed-full-update']"
 EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
+# recruiters often obfuscate: "hr [at] acme [dot] com", "careers(at)acme.com", "jobs at acme dot in"
+_AT = r"\s*(?:@|\[at\]|\(at\)|\{at\}|\s at\s)\s*"
+_DOT = r"\s*(?:\.|\[dot\]|\(dot\)|\{dot\}|\s dot\s)\s*"
+OBFUSCATED = re.compile(rf"([A-Za-z0-9._%+-]+){_AT}([A-Za-z0-9-]+(?:{_DOT}[A-Za-z0-9-]+)*){_DOT}([A-Za-z]{{2,}})\b", re.I)
+NOT_EMAIL_HOSTS = re.compile(r"(?i)\b(linkedin|lnkd)\b")
+
+
+def extract_emails(text: str) -> list[str]:
+    """Plain and obfuscated addresses, normalised to user@domain.tld."""
+    found = {e.strip(".-_").lower() for e in EMAIL.findall(text)}
+    for user, host, tld in OBFUSCATED.findall(text):
+        host = re.sub(_DOT, ".", host, flags=re.I)
+        cand = f"{user}@{host}.{tld}".lower().rstrip(".")
+        if EMAIL.fullmatch(cand) and not NOT_EMAIL_HOSTS.search(cand) and not re.fullmatch(r"\d+@.*", cand):
+            found.add(cand)
+    return sorted(e for e in found if not NOT_EMAIL_HOSTS.search(e.split("@")[1]))
 INDIA = re.compile(r"\b(india|indian|bengaluru|bangalore|hyderabad|pune|mumbai|delhi|ncr|gurugram|gurgaon|noida|chennai|"
                    r"kolkata|ahmedabad|jaipur|kochi|indore|chandigarh|lpa|lakhs?)\b|₹|remote\s*\(?india", re.I)
 # Roles the candidate targets (no bare "data ... engineer": data engineering is a different job)
@@ -78,8 +94,10 @@ def default_queries(profile: dict) -> list[str]:
     roles = ["AI engineer", "GenAI engineer", "machine learning engineer", "python developer", "LLM engineer",
              "data scientist", "full stack developer"]
     places = ["India", "Bangalore", "Gurgaon", "Noida", "Hyderabad", "Pune"]
-    # few, broad searches: LinkedIn pauses search on accounts that search in bursts (seen live 5 Oct 2026)
-    return [f"hiring {r} India" for r in roles[:6]]
+    # few, broad searches: LinkedIn pauses search on accounts that search in bursts (seen live 5 Oct 2026).
+    # Half ask for posts where the recruiter wants resumes by email (the ones worth emailing).
+    return ([f"hiring {r} send resume" for r in ("AI engineer", "python developer", "full stack developer")]
+            + [f"hiring {r} India" for r in ("GenAI engineer", "machine learning engineer", "data scientist")])
 
 
 def parse_post(text: str, author: str, author_url: str, age: str, profile: dict) -> dict | None:
@@ -87,7 +105,7 @@ def parse_post(text: str, author: str, author_url: str, age: str, profile: dict)
     if not HIRING.search(text):
         return None
     # a real opening tells you how to act on it; job-market articles do not
-    if not (EMAIL.search(text) or re.search(r"lnkd\.in/|https?://", text) or
+    if not (extract_emails(text) or re.search(r"lnkd\.in/|https?://", text) or
             re.search(r"\b(dm me|inbox me|send (your )?(cv|resume)|share (your )?(cv|resume)|drop (your )?(cv|resume)|"
                       r"apply (here|now|via|at|through)|comment (below|interested)|whatsapp)\b", text, re.I)):
         return None
@@ -105,7 +123,7 @@ def parse_post(text: str, author: str, author_url: str, age: str, profile: dict)
     return {
         "found_at": datetime.now().isoformat(timespec="minutes"), "post_age": age, "author": author,
         "author_url": author_url, "author_is_person": "/in/" in author_url, "role": role, "experience": exp,
-        "emails": ", ".join(sorted({e.rstrip(".") for e in EMAIL.findall(text)})),
+        "emails": ", ".join(extract_emails(text)),
         "apply_links": ", ".join(sorted(set(re.findall(r"https?://lnkd\.in/\w+", text)))),
         "india_hint": india.group(0), "resume": variant_file(variant_for(role)),
         "key": hashlib.sha1((author + text[:300]).encode()).hexdigest()[:16], "text": text[:3000],
@@ -129,10 +147,18 @@ def collect(page, queries: list[str], profile: dict, scrolls: int = 4) -> list[d
                 from ..cooldown import pause
                 pause("linkedin", 48, "search paused: unusual traffic")
                 break
+            # results often render well after load (seen 10 Oct 2026: 11 posts one time, 0 the next): wait, reload once
+            for attempt in range(2):
+                try:
+                    page.wait_for_selector(POST, timeout=15000)
+                    break
+                except Exception:
+                    if attempt == 0:
+                        page.reload(wait_until="domcontentloaded"); time.sleep(random.uniform(5, 7))
             for _ in range(scrolls):
                 page.mouse.wheel(0, 2500); time.sleep(random.uniform(1.5, 2.5))
             # expand "…more" so the full post text (emails are often at the end) is in the DOM
-            for btn in page.locator(f"{POST} button:has-text('more')").all()[:15]:
+            for btn in page.locator(f"{POST} button:has-text('more')").all()[:40]:
                 try:
                     btn.click(timeout=1500); time.sleep(0.2)
                 except Exception:

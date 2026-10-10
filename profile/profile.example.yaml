@@ -80,3 +80,6 @@ marks_10th_percent: 90
 marks_12th_percent: 85
 # Date of birth as on your ID (YYYY-MM-DD); some employer forms (Workday) require it. Leave out to fill it yourself.
 # date_of_birth: 2000-01-31
+# Recruiter outreach emails: up to 3 facts from your resume, one line each
+# outreach_highlights:
+#   - Built a RAG assistant over 1,000+ documents at 85% retrieval accuracy
