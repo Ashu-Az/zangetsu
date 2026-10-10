@@ -188,7 +188,7 @@ When a posting's button says "Apply on company site", the bot captures the redir
 | 5. Career sites | `workday-run`, `company-apply` | Workday tenants and Greenhouse/Lever/Ashby boards are surveyed directly; links from stages 2 and 4 are added. Each job gets a tailored resume, a keyword-coverage report, and the right form adapter. |
 
 ### Tailoring, grounding and the coverage score
-Each employer job gets a resume built from `profile/resume_variants.yaml` (AI/ML, backend or full-stack variant chosen from the title and the JD's skills), with skills, bullets and projects re-ordered toward the JD. Optional per-job plans (`output/resumes/custom/*.json`) may re-word it further.
+Each employer job gets a resume built from `profile/resume_variants.yaml` (the balanced full-stack + AI variant by default; AI/ML for AI, ML and data roles; backend for backend roles; chosen from the title and the JD's skills), with skills, bullets and projects re-ordered toward the JD. Optional per-job plans (`output/resumes/custom/*.json`) may re-word it further.
 
 **Grounding check** (`grounding.py`): every skill item, the headline and the summary are checked against the candidate's facts (variants, profile skills, projects, education) plus an explicit table of honest relabels (MongoDB → "NoSQL", FAISS → "vector search", GitHub Actions → "CI/CD"). Anything not grounded is dropped and logged, and an ungrounded headline or summary falls back to the variant's own wording. Practices that can't be inferred from facts (Agile, system design, code reviews, ...) pass only if listed in `extra_skills_confirmed` in `profile.yaml`.
 

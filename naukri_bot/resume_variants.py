@@ -18,13 +18,17 @@ from .llm import TailoredResume
 
 VARIANTS_FILE = PROFILE_DIR / "resume_variants.yaml"
 
-# job title words -> variant; first match wins, so the most specific families come first
+# job title words -> variant; first match wins, so the most specific families come first.
+# Full-stack and generic software roles get the balanced full-stack + AI resume (10 Oct 2026); pure AI/ML/data
+# roles get ai_ml (which also lists full-stack skills); explicitly backend roles get backend.
 _RULES = [
-    ("full_stack", r"full[\s-]?stack|mern|mean|front[\s-]?end|react|next\.?js|web developer|ui developer"),
     ("ai_ml", r"\bai\b|a\.i\.|artificial intelligence|machine learning|\bml\b|gen\s?ai|generative|llm|nlp|"
               r"data scien|deep learning|computer vision|prompt|agentic|mlops|ai/ml|ai-ml"),
-    ("backend", r"backend|back-end|python|django|fastapi|flask|node|api|software (engineer|developer)|sde"),
+    ("full_stack_ai", r"full[\s-]?stack|mern|mean|front[\s-]?end|react|next\.?js|web developer|ui developer|"
+                      r"software (engineer|developer)|\bsde\b|\bswe\b|product engineer|application developer"),
+    ("backend", r"backend|back-end|python|django|fastapi|flask|node|api"),
 ]
+DEFAULT_VARIANT = "full_stack_ai"
 
 
 def load_variants(path: Path = VARIANTS_FILE) -> dict:
@@ -33,8 +37,11 @@ def load_variants(path: Path = VARIANTS_FILE) -> dict:
 
 
 def variant_for(title: str, skills: list[str] | None = None) -> str:
-    """Variant key for a job: by title first, then by the job's key skills, default ai_ml."""
+    """Variant key for a job: by title first, then by the job's key skills, default the balanced full_stack_ai."""
     t = (title or "").lower()
+    rules = dict(_RULES)
+    if re.search(rules["ai_ml"], t) and re.search(r"full[\s-]?stack|mern|mean|front[\s-]?end|react|next\.?js", t):
+        return "full_stack_ai"                     # "Gen AI Full Stack Developer": exactly the balanced profile
     for key, pat in _RULES:
         if re.search(pat, t):
             return key
@@ -42,7 +49,7 @@ def variant_for(title: str, skills: list[str] | None = None) -> str:
     for key, pat in _RULES:
         if re.search(pat, s):
             return key
-    return "ai_ml"
+    return DEFAULT_VARIANT
 
 
 def build_resume(data: dict, key: str) -> TailoredResume:
