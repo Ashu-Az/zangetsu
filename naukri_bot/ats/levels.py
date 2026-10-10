@@ -137,6 +137,12 @@ def _mentions(seg: str, skip_preferred: bool) -> list[tuple[int, int | None]]:
     return found
 
 
+def _order(req: tuple[int, int | None]) -> tuple[int, int]:
+    """Sort key: by minimum years, an open-ended "N+" counts as the widest range. (Plain tuple comparison
+    crashed on live Workday postings when two mentions shared a minimum: (3, None) vs (3, 5).)"""
+    return req[0], req[1] if req[1] is not None else 99
+
+
 def experience_required(text: str | None) -> tuple[int, int | None] | None:
     """(min, max) years the posting requires, or None if it states none.
 
@@ -145,11 +151,11 @@ def experience_required(text: str | None) -> tuple[int, int | None] | None:
     Without a section the whole text is scanned and the smallest real mention wins."""
     text = text or ""
     for sec in _requirement_sections(text):
-        per_seg = [min(ms) for seg in _segments(sec) if (ms := _mentions(seg, skip_preferred=True))]
+        per_seg = [min(ms, key=_order) for seg in _segments(sec) if (ms := _mentions(seg, skip_preferred=True))]
         if per_seg:
-            return max(per_seg)
+            return max(per_seg, key=_order)
     allm = [mm for seg in _segments(text) for mm in _mentions(seg, skip_preferred=False)]
-    return min(allm) if allm else None
+    return min(allm, key=_order) if allm else None
 
 
 def min_years_required(text: str | None) -> int | None:
@@ -168,7 +174,7 @@ def experience_label(text: str | None) -> str:
 
 # ---------------------------------------------------------------- seniority
 
-_SENIOR_WORDS = re.compile(r"\b(?:senior|sr|staff|principal|lead|manager|architect|director|head|vp|vice president|"
+_SENIOR_WORDS = re.compile(r"\b(?:senior|sr|staff|principal|lead|manager|architect|director|head|avp|vp|vice president|"
                            r"distinguished|fellow)\b", re.I)
 _ROLE = r"(?:sde|swe|sdet|mts|engineer|developer|scientist|analyst|programmer)"
 _HIGH_LEVEL = re.compile(rf"\b(?:iii|iv)\b|\b{_ROLE}\s*[-,]?\s*(?:[3-9]|vi?)\b|"

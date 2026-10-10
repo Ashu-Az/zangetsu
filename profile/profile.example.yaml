@@ -78,3 +78,5 @@ city: New Delhi
 # 10th / 12th marks for Indian application forms
 marks_10th_percent: 90
 marks_12th_percent: 85
+# Date of birth as on your ID (YYYY-MM-DD); some employer forms (Workday) require it. Leave out to fill it yourself.
+# date_of_birth: 2000-01-31

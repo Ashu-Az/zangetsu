@@ -431,6 +431,22 @@ class WorkdayApplier:
                 label = label.rstrip("*").strip()
                 if not label:
                     continue
+                # date of birth (Workday MM/DD/YYYY widget): only from profile.date_of_birth, never guessed
+                if re.search(r"date of birth|\bdob\b|birth ?date", label, re.I) and f.locator(A("dateSectionMonth-input")).count():
+                    if f.locator(A("dateSectionYear-input")).first.input_value().strip():
+                        continue
+                    dob = str(self.profile.get("date_of_birth") or "")
+                    m = re.fullmatch(r"(\d{4})-(\d{2})-(\d{2})", dob)
+                    if not m:
+                        self._unknown(label, []); continue
+                    for aid, val in (("dateSectionMonth-input", m.group(2)), ("dateSectionDay-input", m.group(3)),
+                                     ("dateSectionYear-input", m.group(1))):
+                        box = f.locator(A(aid))
+                        if box.count():
+                            box.first.evaluate("e => e.focus()"); pg.keyboard.type(val, delay=80)
+                    pg.keyboard.press("Tab"); time.sleep(0.4)
+                    self._note(label, "(from profile)", "profile")
+                    continue
                 # text inputs
                 txt = f.locator("input[type='text'], input:not([type]), input[type='tel'], input[type='email'], textarea")
                 btn = f.locator("button[aria-haspopup='listbox']")

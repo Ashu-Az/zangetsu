@@ -99,3 +99,12 @@ def test_dedupe_roles():
     R = lambda c, t, u: SimpleNamespace(company=c, title=t, apply_url=u)
     roles = [R("x", "AI Engineer", "u1"), R("y", "Other", "u1"), R("x", "AI  engineer!", "u2"), R("x", "SDE", "u3")]
     assert [r.apply_url for r in dedupe_roles(roles)] == ["u1", "u3"]
+
+
+def test_mentions_sharing_a_minimum_do_not_crash():
+    """Live Workday crash, 10 Oct 2026: "3+ years" and "3-5 years" in one posting."""
+    from naukri_bot.ats.levels import experience_required, min_years_required
+    jd = ("Requirements\n- 3+ years of software development experience\n- 3-5 years of experience with Python\n"
+          "- 2+ years of experience with cloud platforms")
+    assert min_years_required(jd) == 3
+    assert experience_required("We need 3+ years of experience or 3-5 years of professional experience") is not None
