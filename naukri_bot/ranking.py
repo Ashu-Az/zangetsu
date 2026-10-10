@@ -85,9 +85,9 @@ def salary_too_low(salary_text: str, settings: Settings) -> str | None:
     rng = parse_salary_lpa(salary_text)
     if rng is None:
         return "salary_undisclosed" if settings.skip_undisclosed_salary else None
-    # Judge by the midpoint: "6-10 Lacs" realistically pays ~8, so it fails a 10 LPA floor;
-    # "8-12" (mid 10) and "9-14" pass.
-    if (rng[0] + rng[1]) / 2 < settings.min_salary_lpa:
+    # Judge by the top of the range: the floor is negotiable inside a band, so "5-13 Lacs" passes an
+    # 8 LPA floor; only a band that cannot reach the floor at all ("3-6 Lacs") is ruled out.
+    if rng[1] < settings.min_salary_lpa:
         return f"salary_below_{settings.min_salary_lpa:g}lpa:{salary_text.strip()}"
     return None
 

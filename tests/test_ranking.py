@@ -99,6 +99,8 @@ def test_salary_filter():
     assert salary_too_low("4-8 Lacs P.A.", s).startswith("salary_below_10lpa")
     assert salary_too_low("8-12 Lacs P.A.", s) is None          # top of range reaches the floor
     assert salary_too_low("12-18 Lacs P.A.", s) is None
+    assert salary_too_low("5 - 13 LPA", Settings(min_salary_lpa=8)) is None   # band can reach the floor
+    assert salary_too_low("3-6 Lacs P.A.", Settings(min_salary_lpa=8)).startswith("salary_below_8lpa")
     assert salary_too_low("Not Disclosed", s) is None
     assert salary_too_low("Not Disclosed", Settings(min_salary_lpa=10, skip_undisclosed_salary=True)) == "salary_undisclosed"
     assert ctc_filter_params(10) == ["ctcFilter=10to15", "ctcFilter=15to25", "ctcFilter=25to50", "ctcFilter=50to75", "ctcFilter=75to100"]
