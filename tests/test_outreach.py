@@ -29,3 +29,11 @@ def test_greeting_and_body_use_only_profile_facts():
     assert subject == "Application for AI Engineer - Rohan Mehta (2 yrs, 30-day notice)"
     assert "Python, FastAPI and RAG" in body and "Built a RAG assistant" in body and "30 days" in body
     assert "http" not in body                      # signature: phone and email only, no links
+
+
+def test_compose_stack_line_lists_technologies_only():
+    from naukri_bot.outreach import Lead, compose
+    lead = Lead(email="hr@x.com", title="Backend Developer", company="X", jd="", url="", source="naukri")
+    _, body = compose(lead, {"name": "A", "total_experience_years": 2, "notice_period_days": 15},
+                      {"matched": ["Python", "Django", "Code reviews", "Agile"]})
+    assert "Python and Django, which is the stack" in body and "Code reviews" not in body

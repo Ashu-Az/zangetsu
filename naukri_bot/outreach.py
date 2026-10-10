@@ -201,7 +201,9 @@ def compose(lead: Lead, profile: dict, coverage: dict) -> tuple[str, str]:
     notice = profile.get("notice_period_days", "")
     title = clean_title(lead.title, lead.company) or "the open role"
     subject = f"Application for {title} - {name} ({years} yrs, {notice}-day notice)"
-    matched = [m for m in coverage.get("matched", []) if len(m) > 1][:5]
+    # technologies only: "Code reviews" or "Agile" are practices, not "the stack I work in"
+    practice = re.compile(r"code reviews?|agile|scrum|testing|documentation|communication|problem[- ]solving|teamwork|sdlc", re.I)
+    matched = [m for m in coverage.get("matched", []) if len(m) > 1 and not practice.fullmatch(m.strip())][:5]
     skills_line = (f"The role asks for {', '.join(matched[:-1])} and {matched[-1]}, which is the stack I work in every day."
                    if len(matched) >= 2 else "My background lines up closely with what the role describes.")
     highlights = profile.get("outreach_highlights") or []
