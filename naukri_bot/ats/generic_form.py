@@ -1110,6 +1110,9 @@ class GenericFormApplier:
                       const w = e.closest('.field-wrapper, fieldset, .input-wrapper, div');
                       const l = w && w.querySelector('label, legend');
                       return ((l && l.innerText.trim().slice(0, 50)) || '?') + ': ' + e.innerText.trim().slice(0, 60); })""")
+                # browser-native validation ("Please select an item in the list") blocks the submit without any
+                # error element on the page: a visible control still :invalid means nothing was sent
+                errs += self._invalid_fields()
                 still_open = self._find_submit() is not None
                 if errs:
                     self.result.status, self.result.notes = "needs_you", "form rejected, NOT submitted: " + "; ".join(errs[:5])
@@ -1121,3 +1124,12 @@ class GenericFormApplier:
                 else:
                     self.result.status, self.result.notes = "unconfirmed", "pressed Submit but saw no confirmation (do NOT resubmit blindly)"
         return self.result
+
+    def _invalid_fields(self) -> list[str]:
+        """'label: browser message' for each visible form control the browser still marks :invalid."""
+        try:
+            return [f"{e.evaluate(LABEL_JS) or e.get_attribute('name') or '?'}"[:50] + ": " + (e.evaluate("e => e.validationMessage") or "invalid")[:60]
+                    for e in self.pg.locator("input:invalid, select:invalid, textarea:invalid").all()
+                    if (e.get_attribute("type") or "") != "hidden" and e.is_visible()]
+        except Exception:
+            return []
