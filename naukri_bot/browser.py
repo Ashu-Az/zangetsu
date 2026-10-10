@@ -47,6 +47,10 @@ class Browser:
         self.context = self.pw.chromium.launch_persistent_context(**kwargs)
         self.context.set_default_timeout(15000)
         self.page = self.context.pages[0] if self.context.pages else self.context.new_page()
+        from .humanize import pace_page                       # steady ~10 s rhythm on every page load
+        for pg in self.context.pages:
+            pace_page(pg, self.settings)
+        self.context.on("page", lambda pg: pace_page(pg, self.settings))
         return self
 
     def __exit__(self, *exc) -> None:

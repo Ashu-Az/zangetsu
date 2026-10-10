@@ -28,24 +28,43 @@ def scroll_like_reader(page, steps: int = 3) -> None:
         time.sleep(random.uniform(0.3, 0.8))
 
 
-_since_break = 0
-_next_break = random.randint(4, 7)
+
+# Steady pacing: a person moves through job pages at a fairly even rhythm (~10 s per page, a few seconds either
+# way), not in bursts followed by long breaks. Both page loads and applications share one clock.
+_last_action = 0.0
+
+
+def steady_gap(settings) -> float:
+    """Seconds for the next gap: centred between MIN_DELAY and MAX_DELAY with mild jitter."""
+    lo, hi = settings.min_delay, settings.max_delay
+    mid, spread = (lo + hi) / 2, (hi - lo) / 4
+    return min(hi, max(lo, random.gauss(mid, spread)))
+
+
+def steady_wait(settings) -> float:
+    """Wait until a steady gap has passed since the previous page load or application; return seconds slept."""
+    global _last_action
+    wait = max(0.0, _last_action + steady_gap(settings) - time.monotonic()) if _last_action else 0.0
+    if wait:
+        time.sleep(wait)
+    _last_action = time.monotonic()
+    return wait
 
 
 def between_applies(settings) -> float:
-    """Wait like a person between two applications and return the seconds slept.
+    """The gap between two applications: the same steady rhythm as page loads (no bursts, no long breaks)."""
+    return steady_wait(settings)
 
-    Most gaps fall between MIN_DELAY and MAX_DELAY, skewed toward the short end (people skim fast, then
-    sometimes linger on a listing); about one gap in eight is a longer read of up to 3x MAX_DELAY; and every
-    4-7 applications there is a 2-6 minute break (BREAK_MIN/BREAK_MAX seconds), the way someone steps away."""
-    global _since_break, _next_break
-    lo, hi = settings.min_delay, settings.max_delay
-    gap = lo + (hi - lo) * random.betavariate(1.6, 3.0)
-    if random.random() < 0.12:
-        gap = random.uniform(hi, hi * 3)
-    _since_break += 1
-    if _since_break >= _next_break:
-        gap += random.uniform(settings.break_min, settings.break_max)
-        _since_break, _next_break = 0, random.randint(4, 7)
-    time.sleep(gap)
-    return gap
+
+def pace_page(page, settings) -> None:
+    """Make page.goto on this page wait for the steady rhythm first."""
+    if getattr(page, "_paced", False):
+        return
+    raw = page.goto
+
+    def goto(url, *a, **kw):
+        steady_wait(settings)
+        return raw(url, *a, **kw)
+
+    page.goto = goto
+    page._paced = True

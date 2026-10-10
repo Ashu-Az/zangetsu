@@ -48,13 +48,19 @@ def test_nvite_remote_location_is_not_work_mode():
     assert skills == ["Python", "FastAPI", "LLM"]
 
 
-def test_between_applies_takes_breaks(monkeypatch):
+def test_steady_pacing(monkeypatch):
     import types
     from naukri_bot import humanize
+    clock = [1000.0]
     slept = []
-    monkeypatch.setattr(humanize.time, "sleep", slept.append)
-    s = types.SimpleNamespace(min_delay=12, max_delay=40, break_min=120, break_max=360)
-    for _ in range(30):
-        humanize.between_applies(s)
-    assert all(g >= 12 for g in slept)
-    assert sum(g >= 120 for g in slept) >= 4          # a 2-6 min break every 4-7 applies
+    monkeypatch.setattr(humanize.time, "monotonic", lambda: clock[0])
+    def sleep(x):
+        slept.append(x); clock[0] += x
+    monkeypatch.setattr(humanize.time, "sleep", sleep)
+    monkeypatch.setattr(humanize, "_last_action", 0.0)
+    s = types.SimpleNamespace(min_delay=8, max_delay=14)
+    humanize.steady_wait(s)                       # first action: no wait
+    for _ in range(40):
+        clock[0] += 1.0                           # the page work itself took a second
+        humanize.steady_wait(s)
+    assert slept and all(7 <= g + 1.0 <= 14 for g in slept)   # every gap 8-14 s, no bursts, no long breaks
