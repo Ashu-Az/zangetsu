@@ -172,3 +172,9 @@ def test_skillset_from_profile():
     assert rule_answer("Skillset *", [], "text", p).answer_text == "Python, FastAPI, RAG, React"
     assert rule_answer("Primary Skills", [], "text", p).answer_text.startswith("Python")
     assert rule_answer("Skillset", ["Java", "Python"], "radio", p) is None or True
+
+
+def test_middle_name_defaults_to_na():
+    from naukri_bot.rules import rule_answer
+    assert rule_answer("Middle Name", [], "text", {}).answer_text == "NA"
+    assert rule_answer("Middle Name *", [], "text", {"middle_name": "Kumar"}).answer_text == "Kumar"

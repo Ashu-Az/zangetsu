@@ -143,6 +143,10 @@ def rule_answer(question: str, options: list[str], kind: str, profile: dict) -> 
         y, m, d = str(profile["date_of_birth"]).split("-")
         return _answer(f"{d}/{m}/{y}")
 
+    # middle name: the profile name has none -> "NA" (required text fields reject blanks)
+    if re.fullmatch(r"(your )?middle name", q) and not has_opts:
+        return _answer(str(profile.get("middle_name") or "NA"))
+
     # skill-set fields: the confirmed primary skills, then secondary ones (comma list, ~12 items)
     if not has_opts and re.fullmatch(r"(your |primary |key |technical |core |main )?(skill ?sets?|skills|tech(nical)? stack|key skills)( \(.*\))?", q):
         sk = list(dict.fromkeys((profile.get("skills_primary") or []) + (profile.get("skills_secondary") or [])))[:12]
