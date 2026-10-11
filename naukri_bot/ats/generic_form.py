@@ -66,7 +66,8 @@ LEGAL_CLAIM = re.compile(
 # The only acknowledgements the bot may tick/confirm on the candidate's behalf: privacy, terms of use, data processing/retention.
 CONSENT_OK = re.compile(
     r"privacy|terms (of (use|service)|and conditions|& conditions)|\bterms\b|data (processing|protection|retention|privacy)|"
-    r"process(ing|es|ed)? (of )?(my |your )?(personal )?(data|information)|personal (data|information)|retain|retention|cookie|gdpr", re.I)
+    r"process(ing|es|ed)? (of )?(my |your )?(personal )?(data|information)|personal (data|information)|retain|retention|cookie|gdpr|"
+    r"storage and handling|store (and|&) (handle|process)|storage of (my |your )?(data|information)", re.I)
 # acknowledgement-style wording (a statement to tick/confirm rather than a fact to fill in)
 ACK_WORDING = re.compile(
     r"\bi (agree|consent|acknowledge|confirm|accept|am allowing|allow|authori[sz]e|certify|declare|understand|attest)\b|please confirm|"
@@ -655,7 +656,7 @@ class GenericFormApplier:
     def _toggle_groups(self) -> None:
         """Ashby (and others) render yes/no questions as two toggle buttons, not radios (Cerebras' required 'Open to
         relocation if necessary', 10 Oct 2026). Answer them from the profile through the rule engine."""
-        groups = self.pg.evaluate("""() => {
+        groups = self.pg.evaluate(r"""() => {
           const out = []; const seen = new Set();
           for (const b of document.querySelectorAll('button')) {
             if (!/^(yes|no)$/i.test((b.innerText || '').trim())) continue;

@@ -606,6 +606,8 @@ def cmd_company_apply(settings: Settings, args) -> int:
     for url, role, jd_url in entries:
         if url in applied_urls or (role and Tracker.role_key(company_from_url(url), role) in recent):
             log.info("skip (already applied): %s", url[:100]); continue
+        if re.search(r"intern(ship)?s?\b|trainee|fresher", url + " " + role, re.I):   # internship pages are not the role
+            log.info("skip (internship/trainee page): %s", url[:100]); continue
         kept.append((url, role, jd_url))
     entries = kept
     Settings.browser_profile_dir = property(lambda self, d=args.browser_profile: STATE_DIR / d)
