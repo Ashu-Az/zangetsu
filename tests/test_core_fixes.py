@@ -73,3 +73,9 @@ def test_saved_for_manual_does_not_block_company_apply(tmp_path):
     t.applications_csv.write_text("timestamp,company,title,status\n2099-01-01T00:00:00,Prodigal,Forward Deployed Engineer,saved_for_manual\n")
     assert Tracker.role_key("Prodigal", "Forward Deployed Engineer") in t.recent_role_keys()
     assert not t.recent_role_keys(include_saved=False)
+
+
+def test_age_in_years():
+    from naukri_bot.ranking import parse_age_days
+    assert parse_age_days("1 year ago") == 365 and parse_age_days("a year ago") == 365
+    assert parse_age_days("POSTED 4 YEARS AGO") == 4 * 365 and parse_age_days("3 days ago") == 3

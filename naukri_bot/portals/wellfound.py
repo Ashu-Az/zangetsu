@@ -93,7 +93,9 @@ class WellfoundPortal(Portal):
         if m and not job.company:
             job.company = m.group(2).strip()
         i = t.find("Role Overview"); i = i if i >= 0 else t.find("About the job"); job.description = t[i:i + 8000] if i >= 0 else t[:6000]
-        apply_btns = [b.inner_text().strip().lower() for b in pg.locator("button").all() if b.is_visible() and re.search(r"^appl", b.inner_text().strip(), re.I)]
+        # button text may carry an icon glyph ("✓ Applied"): compare on the letters only
+        apply_btns = [re.sub(r"^[^a-z]+", "", b.inner_text().strip().lower()) for b in pg.locator("button").all() if b.is_visible()]
+        apply_btns = [b for b in apply_btns if b.startswith("appl")]
         if any(b.startswith("applied") for b in apply_btns):
             return job, ApplyMode.ALREADY_APPLIED
         if any(b in ("apply", "apply now") for b in apply_btns):

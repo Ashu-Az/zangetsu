@@ -48,11 +48,12 @@ def parse_age_days(text: str) -> float | None:
         return None
     if any(k in t for k in ("just now", "few hours", "hour ago", "hours ago", "minute", "today")):
         return 0.0
-    m = re.search(r"(\d+)\s*(\+)?\s*(day|week|month)", t)
+    t = re.sub(r"\b(a|an)\s+(day|week|month|year)\b", r"1 \2", t)          # "a year ago" (Wellfound)
+    m = re.search(r"(\d+)\s*(\+)?\s*(day|week|month|year)", t)
     if not m:
         return None
     n = int(m.group(1)) + (1 if m.group(2) else 0)
-    return float(n * {"day": 1, "week": 7, "month": 30}[m.group(3)])
+    return float(n * {"day": 1, "week": 7, "month": 30, "year": 365}[m.group(3)])
 
 
 def parse_salary_lpa(text: str) -> tuple[float, float] | None:
