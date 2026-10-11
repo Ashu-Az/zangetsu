@@ -143,6 +143,12 @@ def rule_answer(question: str, options: list[str], kind: str, profile: dict) -> 
         y, m, d = str(profile["date_of_birth"]).split("-")
         return _answer(f"{d}/{m}/{y}")
 
+    # skill-set fields: the confirmed primary skills, then secondary ones (comma list, ~12 items)
+    if not has_opts and re.fullmatch(r"(your |primary |key |technical |core |main )?(skill ?sets?|skills|tech(nical)? stack|key skills)( \(.*\))?", q):
+        sk = list(dict.fromkeys((profile.get("skills_primary") or []) + (profile.get("skills_secondary") or [])))[:12]
+        if sk:
+            return _answer(", ".join(sk))
+
     # ---- never decided on the candidate's behalf: health, disability, drug tests, money/time commitments.
     # Returning None defers the job to the person. Found by review on 9 Oct 2026: the willingness and consent
     # rules were answering "Yes" to medical exams, drug tests, 2-year bonds with penalties and unpaid work.

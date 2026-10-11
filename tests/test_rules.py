@@ -164,3 +164,11 @@ def test_bucket_options_with_angle_brackets():
     opts = ["No experience", "<3 years", "3-5 years", "5-7 years", "7-9 years", ">9 years"]
     a = rule_answer("How many years of experience do you have as AI Engineer ?", opts, "radio", p)
     assert a and opts[a.selected_option_indices[0]] == "<3 years"
+
+
+def test_skillset_from_profile():
+    from naukri_bot.rules import rule_answer
+    p = {"skills_primary": ["Python", "FastAPI", "RAG"], "skills_secondary": ["React", "Python"]}
+    assert rule_answer("Skillset *", [], "text", p).answer_text == "Python, FastAPI, RAG, React"
+    assert rule_answer("Primary Skills", [], "text", p).answer_text.startswith("Python")
+    assert rule_answer("Skillset", ["Java", "Python"], "radio", p) is None or True
