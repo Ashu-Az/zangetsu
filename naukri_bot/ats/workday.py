@@ -490,8 +490,10 @@ class WorkdayApplier:
                     continue
                 # the Skills section is filled by _fill_skills; its leftover search box ("Type to Add Skills") is not
                 # an unanswered question once skills are selected
+                skills_done = any(x.get("label") == "Skills" and x.get("value") and x.get("value") != "(none matched)"
+                                  for x in self.result.filled)
                 if (f.get_attribute("data-automation-id") == "formField-skills" or re.search(r"type to add skills", label, re.I)) \
-                        and pg.locator(f"{A('formField-skills')} {A('selectedItem')}").count():
+                        and (skills_done or pg.locator(f"{A('formField-skills')} {A('selectedItem')}").count()):
                     continue
                 # date of birth (Workday MM/DD/YYYY widget): only from profile.date_of_birth, never guessed
                 if re.search(r"date of birth|\bdob\b|birth ?date", label, re.I) and f.locator(A("dateSectionMonth-input")).count():
