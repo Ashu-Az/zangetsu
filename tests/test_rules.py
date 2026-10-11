@@ -156,3 +156,11 @@ def test_date_of_birth_from_profile():
     assert rule_answer("Date Of Birth", [], "text", p).answer_text == "26/07/2003"
     assert rule_answer("DOB *", [], "text", p).answer_text == "26/07/2003"
     assert rule_answer("Date Of Birth", [], "text", {}) is None
+
+
+def test_bucket_options_with_angle_brackets():
+    from naukri_bot.rules import rule_answer
+    p = {"total_experience_years": 2, "relevant_experience_years": 2, "skill_years": {}}
+    opts = ["No experience", "<3 years", "3-5 years", "5-7 years", "7-9 years", ">9 years"]
+    a = rule_answer("How many years of experience do you have as AI Engineer ?", opts, "radio", p)
+    assert a and opts[a.selected_option_indices[0]] == "<3 years"

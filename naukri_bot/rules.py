@@ -55,6 +55,12 @@ def _range_of(option: str, unit_hint: str = "") -> tuple[float, float] | None:
     if unit_hint == "money":
         mult = 1
     nums = [n * mult for n in nums]
+    if re.match(r"\s*<\s*=", o):                     # "<=3 years"
+        return (0, nums[-1])
+    if re.match(r"\s*<", o):                          # "<3 years" excludes 3
+        return (0, nums[-1] - 0.01)
+    if re.match(r"\s*>", o):                          # ">9 years"
+        return (nums[0] + (0 if "=" in o else 0.01), float("inf"))
     if re.search(r"less than|below|under\b|fewer than", o) and "or less" not in o:
         return (0, nums[-1] - 0.01)                 # "Less than 2" excludes 2
     if "less" in o or "below" in o or "upto" in o or "up to" in o or "within" in o:
