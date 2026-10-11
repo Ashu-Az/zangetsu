@@ -381,7 +381,7 @@ class WorkdayApplier:
             return None, ""                          # never put the phone number into "Phone Extension"
         table = [
             (r"\b(given|first) name", p.get("first_name")), (r"\b(family|last) name|surname", p.get("last_name")),
-            (r"address line 1|street", p.get("address_line1")), (r"\bcity\b|town", p.get("city")),
+            (r"address line 1|street", p.get("address_line1")), (r"address line 2", p.get("address_line2")), (r"\bcity\b|town", p.get("city")),
             (r"postal|pin ?code|zip", p.get("postal_code")), (r"^(phone|mobile)( number)?$|phone number|mobile number", p.get("phone_national")),
             (r"country phone code|phone code|country code", p.get("phone_country_code")),
             (r"^email", p.get("email")), (r"linkedin", (p.get("links") or {}).get("linkedin")),
@@ -487,6 +487,11 @@ class WorkdayApplier:
                 label = " ".join((f.locator("label, legend").first.inner_text() if f.locator("label, legend").count() else "").split())
                 label = label.rstrip("*").strip()
                 if not label:
+                    continue
+                # the Skills section is filled by _fill_skills; its leftover search box ("Type to Add Skills") is not
+                # an unanswered question once skills are selected
+                if (f.get_attribute("data-automation-id") == "formField-skills" or re.search(r"type to add skills", label, re.I)) \
+                        and pg.locator(f"{A('formField-skills')} {A('selectedItem')}").count():
                     continue
                 # date of birth (Workday MM/DD/YYYY widget): only from profile.date_of_birth, never guessed
                 if re.search(r"date of birth|\bdob\b|birth ?date", label, re.I) and f.locator(A("dateSectionMonth-input")).count():
