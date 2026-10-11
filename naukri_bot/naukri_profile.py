@@ -50,7 +50,9 @@ def _wait_closed(page, drawer, timeout_s: float = 10) -> bool:
 
 def _set_textarea_and_save(page, section_id: str, textarea_id: str, text: str, label: str) -> bool:
     drawer = _open_drawer(page, section_id)
-    box = drawer.locator(f"#{textarea_id}")
+    # Naukri renames these ids now and then (resumeHeadlineTxt -> resumeHeadline, Oct 2026): accept the old id,
+    # the id without its "Txt" suffix, or the drawer's only textarea
+    box = drawer.locator(f"#{textarea_id}, #{textarea_id.removesuffix('Txt')}, textarea").first
     box.click()
     page.keyboard.press("Meta+A")
     page.keyboard.press("Backspace")
@@ -713,7 +715,7 @@ def refresh(browser, force: bool = False) -> tuple[bool, str]:
     page = browser.page
     try:
         drawer = _open_drawer(page, "lazyResumeHead")
-        current = " ".join(drawer.locator("#resumeHeadlineTxt").input_value(timeout=15000).split())
+        current = " ".join(drawer.locator("#resumeHeadlineTxt, #resumeHeadline").input_value(timeout=15000).split())
     except Exception as e:                       # drawer slow or layout changed: skip this refresh, try next time
         return False, f"could not open the headline editor ({type(e).__name__}); not touching it"
     page.keyboard.press("Escape"); pause(1.0, 1.5)
