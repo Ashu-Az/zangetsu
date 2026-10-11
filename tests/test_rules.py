@@ -148,3 +148,11 @@ def test_existing_covenant_is_a_fact_but_signing_one_is_the_persons_call():
     a = yn("Have you entered into any restrictive covenant, non-compete agreement, or non-disclosure agreement?")
     assert a is not None and a.selected_option_indices == [1]
     assert yn("Are you willing to sign a non-compete?") is None
+
+
+def test_date_of_birth_from_profile():
+    from naukri_bot.rules import rule_answer
+    p = {"date_of_birth": "2003-07-26"}
+    assert rule_answer("Date Of Birth", [], "text", p).answer_text == "26/07/2003"
+    assert rule_answer("DOB *", [], "text", p).answer_text == "26/07/2003"
+    assert rule_answer("Date Of Birth", [], "text", {}) is None

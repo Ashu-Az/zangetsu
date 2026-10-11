@@ -132,6 +132,11 @@ def rule_answer(question: str, options: list[str], kind: str, profile: dict) -> 
     q = q.rstrip(" *:").strip()          # required-field marker: "How many years of Python?\xa0*"
     has_opts = bool(options)
 
+    # date of birth: from profile.date_of_birth (YYYY-MM-DD), in the DD/MM/YYYY form Indian forms expect
+    if re.fullmatch(r"(your )?(date of birth|dob|birth ?date)( \(dd/mm/yyyy\))?", q) and profile.get("date_of_birth") and not has_opts:
+        y, m, d = str(profile["date_of_birth"]).split("-")
+        return _answer(f"{d}/{m}/{y}")
+
     # ---- never decided on the candidate's behalf: health, disability, drug tests, money/time commitments.
     # Returning None defers the job to the person. Found by review on 9 Oct 2026: the willingness and consent
     # rules were answering "Yes" to medical exams, drug tests, 2-year bonds with penalties and unpaid work.
