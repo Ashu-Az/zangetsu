@@ -25,14 +25,21 @@ def load_content() -> dict:
 
 
 def _open_drawer(page, section_id: str):
-    page.locator(f"#{section_id}").scroll_into_view_if_needed()
-    pause(0.5, 1.0)
-    page.locator(f"#{section_id} [class*='edit']").first.click()
     drawer = page.locator(DRAWER).filter(has=page.locator("button"))
-    for i in range(drawer.count()):
-        if drawer.nth(i).is_visible():
-            pause(1.0, 1.5)
-            return drawer.nth(i)
+    # the drawer can take a few seconds to slide in when Naukri is slow (failed on the 13 and 14 Oct morning
+    # runs, which checked right after the click): wait for it, and click Edit a second time if it never shows
+    for attempt in range(2):
+        page.locator(f"#{section_id}").scroll_into_view_if_needed()
+        pause(0.5, 1.0)
+        page.locator(f"#{section_id} [class*='edit']").first.click()
+        deadline = time.time() + 8
+        while time.time() < deadline:
+            for i in range(drawer.count()):
+                if drawer.nth(i).is_visible():
+                    pause(1.0, 1.5)
+                    return drawer.nth(i)
+            time.sleep(0.5)
+        log.info("edit drawer for #%s did not open (attempt %d)", section_id, attempt + 1)
     raise RuntimeError(f"edit drawer for #{section_id} did not open")
 
 

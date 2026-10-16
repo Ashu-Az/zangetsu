@@ -32,6 +32,7 @@ class QuestionnaireResult:
 
 
 INFO_MESSAGE = re.compile(r"recruiter requires more information|please answer (the following|a few)|"
+                          r"kindly answer all the recruiter|thank you for showing interest|"   # Neo's drawer intro (14 Oct 2026)
                           r"answer (a few|the following) questions|to consider your appl", re.I)
 
 
@@ -52,6 +53,23 @@ class DrawerHandler:
         self.assist = assist                           # ask the person at the keyboard instead of abandoning a question
 
     # ---------- DOM reads ----------
+    # Controls outside the question drawer that match the drawer selectors: Naukri's header search bar
+    # ("[class*='suggestor'] input") and Neo's own chat box and Send button. On the Neo page the search bar is open,
+    # and the bot typed answers into it (14 Oct 2026), so every drawer lookup skips them.
+    _NOT_DRAWER = "header, [class*='nI-gnb'], [class*='gnb'], [class*='qsb'], [class*='searchBar'], [class*='search-bar'], " \
+                  ".aGn-uI-footer-container, [class*='aGn-uI-footer']"
+
+    def _fv(self, selector: str):
+        loc = self.page.locator(selector)
+        for i in range(min(loc.count(), 15)):
+            el = loc.nth(i)
+            try:
+                if el.is_visible() and not el.evaluate("(e, s) => !!e.closest(s)", self._NOT_DRAWER):
+                    return el
+            except Exception:
+                continue
+        return None
+
     def drawer_visible(self) -> bool:
         return self.b.first_visible(S.DRAWER) is not None
 
@@ -96,7 +114,7 @@ class DrawerHandler:
         return ""
 
     def _visible_labels(self, container_sel: str, label_sel: str) -> list[str]:
-        cont = self.b.first_visible(container_sel)
+        cont = self._fv(container_sel)
         if not cont:
             return []
         labels = cont.locator(label_sel)
@@ -118,21 +136,21 @@ class DrawerHandler:
         opts = self._visible_labels(S.CHECKBOX_CONTAINER, S.CHECKBOX_LABEL)
         if opts:
             return "checkbox", opts
-        sel = self.b.first_visible(S.DROPDOWN)
+        sel = self._fv(S.DROPDOWN)
         if sel:
             options = sel.locator("option")
             labels = [options.nth(i).inner_text().strip() for i in range(options.count())]
             labels = [l for l in labels if l and l.lower() not in ("select", "select an option", "--select--")]
             return "dropdown", labels
-        if self.b.first_visible(S.SUGGESTOR_INPUT):
+        if self._fv(S.SUGGESTOR_INPUT):
             return "suggestor", []
-        if self.b.first_visible(S.TEXT_INPUT):
+        if self._fv(S.TEXT_INPUT):
             return "text", []
         return None, []
 
     # ---------- DOM writes ----------
     def _click_send(self) -> bool:
-        btn = self.b.first_visible(S.SEND_BUTTON)
+        btn = self._fv('.sendMsg') or self._fv(S.SEND_BUTTON)   # the Save button itself, not its full-width row (Neo drawer)
         if not btn:
             return False
         cls = (btn.get_attribute("class") or "") + " " + (btn.evaluate("e => e.parentElement ? e.parentElement.className : ''") or "")
@@ -142,7 +160,7 @@ class DrawerHandler:
         return True
 
     def _click_options(self, container_sel: str, label_sel: str, indices: list[int]) -> None:
-        cont = self.b.first_visible(container_sel)
+        cont = self._fv(container_sel)
         labels = cont.locator(label_sel)
         for idx in indices:
             if 0 <= idx < labels.count():
@@ -155,21 +173,21 @@ class DrawerHandler:
         elif kind == "checkbox":
             self._click_options(S.CHECKBOX_CONTAINER, S.CHECKBOX_LABEL, answer.selected_option_indices)
         elif kind == "dropdown":
-            sel = self.b.first_visible(S.DROPDOWN)
+            sel = self._fv(S.DROPDOWN)
             idx = answer.selected_option_indices[0] if answer.selected_option_indices else None
             label = options[idx] if idx is not None and idx < len(options) else answer.answer_text
             sel.select_option(label=label)
         elif kind == "suggestor":
-            inp = self.b.first_visible(S.SUGGESTOR_INPUT)
+            inp = self._fv(S.SUGGESTOR_INPUT)
             inp.click()
             inp.fill("")
             self.page.keyboard.type(answer.answer_text, delay=random.randint(50, 130))
             pause(1.0, 1.8)
-            opt = self.b.first_visible(S.SUGGESTOR_OPTION)
+            opt = self._fv(S.SUGGESTOR_OPTION)
             if opt:
                 opt.click()
         else:  # free text in contenteditable
-            box = self.b.first_visible(S.TEXT_INPUT)
+            box = self._fv(S.TEXT_INPUT)
             box.click()
             box.evaluate("e => { if (e.isContentEditable) e.innerText = ''; else e.value = ''; }")
             self.page.keyboard.type(answer.answer_text, delay=random.randint(35, 110))
@@ -185,6 +203,8 @@ class DrawerHandler:
         Returns True once the chat moves on (new bot message or the drawer closed); the answer is saved for reuse."""
         import subprocess
         log.warning("   >>> YOUR TURN: answer in the Chromium window: %s", question[:120])
+        from .ask_ashu import record
+        record(question, options, "naukri", getattr(self.job, "company", ""))
         try:
             msg = question.replace('"', "'")[:120]
             subprocess.run(["osascript", "-e", f'display notification "{msg}" with title "Naukri bot needs your answer" sound name "Glass"'],
@@ -329,6 +349,8 @@ class DrawerHandler:
                     last_key = None
                     self.msg_count_at_answer = None
                     continue
+                from .ask_ashu import record
+                record(question, options, "naukri", getattr(self.job, "company", ""))
                 result.notes = f"needs model: {question[:100]}"
                 log.info("   deferred, open question needs the model")
                 self.close_drawer()
@@ -339,6 +361,17 @@ class DrawerHandler:
                 self.close_drawer()
                 return result
 
+            if ans.skip or (not ans.answer_text and not ans.selected_option_indices):
+                # "How many years of experience in <tool not on the resume>?": the truthful answer is 0, and the
+                # application should still go in (Robot Framework, Tech Mahindra, 16 Oct 2026; Ashu: No/0 only when
+                # the tech was never used). Never for tenure-in-total questions, only a named skill.
+                if kind == "text" and not options and re.search(r"how many years|years of experience|experience (do you have )?in", question, re.I) \
+                        and not re.search(r"total|overall|relevant|professional|work experience\??$", question, re.I):
+                    from .llm import QuestionAnswer
+                    ans, source = QuestionAnswer(answer_text="0", selected_option_indices=[], reusable=True, skip=False,
+                                                 confidence=0.9), "rules:not-on-resume"
+                    from .ask_ashu import record
+                    record(question, options, "naukri", getattr(self.job, "company", ""))   # Ashu can correct it later
             if ans.skip or (not ans.answer_text and not ans.selected_option_indices):
                 if self.assist and self.ask_human(question, kind, options):
                     result.answered.append({"question": question, "kind": kind, "options": options, "answer": "(you)", "source": "human"})

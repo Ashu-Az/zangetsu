@@ -38,8 +38,10 @@ class WorkdayResult:
 
 class WorkdayApplier:
     def __init__(self, page, profile: dict, email: str, password: str, resume_path: str, assist: bool = True,
-                 submit: bool = False):
+                 submit: bool = False, jd: str = "", job_location: str = ""):
         self.pg, self.profile, self.email, self.password = page, profile, email, password
+        self.jd = jd or ""                         # the job description, when the caller has it (minimum years etc.)
+        self.job_location = job_location or ""     # e.g. "IND.Pune": India jobs make work-authorization answers confirmed
         self.submit = submit                       # press Submit at Review (only when every answer is from confirmed facts)
         self.resume_path, self.assist = os.path.abspath(resume_path), assist
         self.result = WorkdayResult("failed")
@@ -91,10 +93,16 @@ class WorkdayApplier:
         self.result.filled = [f for f in self.result.filled if not (f["source"] == "unknown" and f["label"] == label)]
         self.result.filled.append({"label": label, "value": value, "source": source})
 
-    @staticmethod
-    def _rule_source(label: str, default: str = "profile/rules") -> str:
-        """Right-to-work / sponsorship answers depend on the job's country, which Workday's form doesn't show."""
-        return "rules (work authorization: check job country)" if WORK_AUTH_Q.search(label) else default
+    def _rule_source(self, label: str, default: str = "profile/rules") -> str:
+        """Right-to-work / sponsorship answers depend on the job's country, which Workday's form doesn't show. When the
+        caller passed the job's location and it is in India (the candidate is an Indian citizen), the answer is a
+        confirmed fact; otherwise it stays for the person to check."""
+        if not WORK_AUTH_Q.search(label):
+            return default
+        if re.search(r"\bindia\b|\bIND\b|bengaluru|bangalore|hyderabad|pune|chennai|mumbai|gurugram|gurgaon|noida|delhi|kolkata|ahmedabad",
+                     self.job_location or "", re.I) and not re.search(r"remote\s*-?\s*(us|usa|uk|eu)|united states|singapore|dubai", self.job_location or "", re.I):
+            return default
+        return "rules (work authorization: check job country)"
 
     def ask_human(self, what: str, timeout_s: int = 600) -> bool:
         """Alert the person and wait until the step changes (they fixed/answered it and pressed Continue)."""
@@ -275,6 +283,7 @@ class WorkdayApplier:
                     if self._wait_past_auth(20):
                         log.info("  account created; now on: %s", self.step())
                         return True
+                    created_at = time.time()
                     # some tenants (Thomson Reuters) send a new account back to their sign-in gate: sign in now
                     self._email_route()
                     if self._visible(A("signInSubmitButton"), timeout=8000):
@@ -283,6 +292,12 @@ class WorkdayApplier:
                         if self._wait_past_auth(25):
                             log.info("  signed in; now on: %s", self.step())
                             return True
+                    # still on Sign In: the new account must be verified from the email first (TR, Rockwell,
+                    # Workday, 13 Oct 2026); open the link from Gmail when an app password is set, then sign in
+                    if self._verify_from_mail(created_at):
+                        return True
+        if getattr(self, "_created_at", 0) and self._verify_from_mail(self._created_at):
+            return True
         body = pg.inner_text("body").lower()
         if re.search(r"verify your (email|account)|verification (email|link)|check your email", body):
             self.result.status, self.result.notes = "needs_verification", "Workday sent a verification email; click it, then rerun"
@@ -301,9 +316,38 @@ class WorkdayApplier:
             self.result.status, self.result.notes = "needs_you", "could not get past Create Account/Sign In"
         return False
 
+    def _verify_from_mail(self, since: float) -> bool:
+        from .. import mailbox
+        if not mailbox.available() or getattr(self, "_mail_tried", False):
+            return False
+        self._mail_tried = True
+        host = re.sub(r"^https?://", "", self.pg.url).split("/")[0]
+        log.info("  waiting for the verification email from %s", host)
+        link = mailbox.find_link(host, since)
+        if not link:
+            log.info("  no verification email arrived")
+            return False
+        back = self.pg.url
+        self.pg.goto(link, wait_until="domcontentloaded"); time.sleep(4)
+        log.info("  opened the verification link")
+        if self._past_auth():
+            return True
+        if not self._visible(A("signInSubmitButton"), timeout=5000):
+            self.pg.goto(back, wait_until="domcontentloaded"); time.sleep(3)
+            self._email_route()
+            if self._visible(A("signInLink"), timeout=5000) and not self._visible(A("signInSubmitButton")):
+                self._click(A("signInLink")); time.sleep(2)
+        if self._visible(A("signInSubmitButton"), timeout=8000):
+            self._sign_in()
+            if self._wait_past_auth(25):
+                log.info("  verified and signed in; now on: %s", self.step())
+                return True
+        return False
+
     def _create_account(self) -> None:
         pg = self.pg
         log.info("  creating a Workday account for %s", self.email)
+        self._created_at = time.time()
         pg.locator(A("email")).first.fill(self.email)
         pg.locator(A("password")).first.fill(self.password)
         if pg.locator(A("verifyPassword")).count():
@@ -385,6 +429,10 @@ class WorkdayApplier:
             (r"postal|pin ?code|zip", p.get("postal_code")), (r"^(phone|mobile)( number)?$|phone number|mobile number", p.get("phone_national")),
             (r"country phone code|phone code|country code", p.get("phone_country_code")),
             (r"^email", p.get("email")), (r"linkedin", (p.get("links") or {}).get("linkedin")),
+            # Workday address split into door / building (16 Oct 2026); "Company" on My Information = current employer
+            (r"^door( number| no\.?)?$|^house (number|no\.?)$|^flat( number| no\.?)?$", str(p.get("address_line1") or "").split(",")[0].strip() or None),
+            (r"^building( name)?$", str(p.get("address_line1") or "").split(",")[0].strip() or None),
+            (r"^(current )?company( name)?$|^current employer$", p.get("current_company")),
         ]
         for pat, val in table:
             if val and re.search(pat, l):
@@ -400,7 +448,10 @@ class WorkdayApplier:
                         return i
             return None
         if re.search(r"^(how did you hear|source\b)", l):
-            return pick(*[re.escape(h) for h in p.get("how_heard") or []])
+            i = pick(*[re.escape(h) for h in p.get("how_heard") or []])
+            # employee-status style source lists (Citi: AMS / Citi Employee on Leave / Non Citi Employee / Redeployment)
+            return i if i is not None else pick(r"^non[- ].{0,30}employee", r"^external( candidate| applicant)?$", r"^(job ?board|job portal|online)",
+                                                  r"\b(job ?boards?|job (portal|posting|site|search (site|engine))s?|online (job|posting|advert)|internet)\b")
         # data-retention choice: keep the profile so the employer can suggest future roles (Ashu: yes to future roles)
         keep = pick(r"(kept|keep|retain).{0,60}(future|suitable|other) (roles|opportunit|positions|vacanc)|notify me of any suitable roles")
         if keep is not None and re.search(r"select one of the following|personal (information|data)|retention|how long", l + " " + " ".join(options), re.I):
@@ -423,7 +474,9 @@ class WorkdayApplier:
             return pick(rf"^{st}$", rf"^{st}\b", rf"(nct|national capital territory) of {st}", rf"\b{st}\b") if p.get("state") else None
         if re.search(r"^(phone device|device type)", l):
             return pick(r"^mobile", r"cell", r"^main$")
-        if re.search(r"\b(gender|sex)\b", l) and len(l) < 60 and not re.search(r"pronoun|transgender|orientation", l):
+        # short labels ("Gender") or a long preamble ending in the ask ("... Please indicate your gender below.": Salesforce)
+        if re.search(r"\b(gender|sex)\b", l) and (len(l) < 60 or re.search(r"(indicate|select|state|provide|what is) your (gender|sex)\b", l)) \
+                and not re.search(r"pronoun|transgender|orientation", l):
             return pick(rf"^{re.escape(p.get('gender', ''))}$") if p.get("gender") else None
         if re.search(r"veteran", l):
             return pick(r"not a (protected )?veteran", r"^no\b", r"i am not") if p.get("veteran") is False else None
@@ -438,18 +491,58 @@ class WorkdayApplier:
                      r"(been|are you) (currently,? )?(or have you been )?an? (contractor|consultant|contingent worker) (with|for|at)|"
                      r"(currently|ever),? or have you (ever )?been an? (contractor|employee)|"
                      r"have you worked at .{0,40} as an? (employee|consultant|contractor)|did you (work|previously work) (previously )?(at|for)|"
-                     r"within the past \d+ years,? have you been employed by|are you an? (existing|current) .{0,20}employee", l):
+                     r"within the past \d+ years,? have you been employed by|are you an? (existing|current) .{0,20}employee|"
+                     r"have you ever been an employee (for|of|at)", l):
             return pick(r"^no\b", r"(have not|haven.t|never) (worked|been employed)", r"^none\b", r"not (a )?(current|former)")
         if re.search(r"(united states|u\.s\.|us) government or public institution|government (or public sector )?employ", l):
             return pick(r"^no\b")                          # only employers: Quess, HeadsUp, ROVA, Verzeo (all private, India)
-        if p.get("no_conflicts_of_interest") and re.search(r"conflict(s)? of interest", l):
+        if p.get("no_conflicts_of_interest") and re.search(r"conflicts?(\(s\))? of interest", l):
             return pick(r"^no\b")
-        if re.search(r"export control", l) and re.search(r"citizen or permanent resident of one or more of the countries", l):
-            return pick(r"^no\b")                          # Indian citizen only; India is not on the US-embargoed list
+        if (re.search(r"export control", l) and re.search(r"citizen or permanent resident of one or more of the countries", l)) or \
+                re.search(r"for any of the countries listed below.{0,80}(citizen|passport|dual citizenship)", l):
+            return pick(r"^no\b")                          # Indian citizen only, no passport; India is not on the US-embargoed list
+        if re.search(r"willing to travel", l) and p.get("willing_to_travel"):
+            want = re.escape(str(p["willing_to_travel"]))            # e.g. "25% to 50%" (Ashu, 12 Oct 2026)
+            return pick(want, r"25%? to 50%", r"up to 25%")
+        if re.search(r"ever accepted an offer (to work )?(at|with|from)", l) and \
+                not re.search(r"quess|headsup|rova|botter|verzeo", l):
+            return pick(r"^no\b")                          # only offers ever accepted: his four employers
+        if re.search(r"(basic|essential|minimum) (/essential |or essential )?qualifications", l):
+            # only numbers tied to experience: "3-7 years of experience", "experience: 2+ years", "minimum 2 years' experience"
+            exp = r"(\d{1,2})\s*\+?\s*(?:-|–|to)?\s*\d{0,2}\s*\+?\s*(?:years|yrs)['’]?\s*(?:of\s+)?(?:\w+\s+){0,3}?experience"
+            mins = [int(x) for x in re.findall(exp, self.jd, re.I)] + \
+                   [int(x) for x in re.findall(r"experience[^.\n]{0,30}?(\d{1,2})\s*\+?\s*(?:-|–|to)?\s*\d{0,2}\s*(?:years|yrs)", self.jd, re.I)]
+            yrs = float(p.get("total_experience_years") or 2)
+            # Ashu (12 Oct 2026): Yes only when the role's minimum experience is within his ~2 years
+            if mins and min(mins) <= yrs:
+                return pick(r"^yes\b")
+            return None
+        if re.search(r"valid residency permit in the country", l):
+            return pick(r"not applicable", r"^yes\b")      # Indian citizen applying to India roles: no permit needed
+        if re.search(r"(future (positions|openings|opportunities|roles)).{0,60}(select|option|communicat)|regarding future positions", l):
+            return pick(r"^yes\b.*(receive|contact|communicat)|^yes\b")
+        if re.search(r"preference to receive notification", l):
+            return pick(r"whatsapp and email", r"^email only")   # Ashu opted in to SMS/WhatsApp contact
         if re.search(r"name exactly as (shown )?on my aadhaar|aadhaar card", l + " " + " ".join(options), re.I) and p.get("name_matches_id_documents"):
             return pick(r"provided my name exactly as shown on my aadhaar")
         if re.search(r"legal age to work|at least 18|18 years (of age|or older)", l):
             return pick(r"^yes\b")
+        # education level lists with ISCED labels (13 Oct 2026): B.Tech = bachelor's, ISCED 6
+        if re.fullmatch(r"(highest )?(degree|level of education|education level|highest (level of )?education)( attained| completed)?\??", l):
+            return pick(r"^bachelor", r"isced 6\b", r"\bbachelor", r"b\.?\s?tech|b\.?\s?eng\b|b\.?e\b|undergraduate degree")   # "B.Eng" (Citi, 16 Oct 2026)
+        # "previous worker or contractor of Equifax or its subsidiaries" (13 Oct 2026)
+        if re.search(r"previous (worker|employee|contractor)|former (worker|contractor)", l):
+            return pick(r"^no\b")
+        # work arrangement: Ashu is open to all of them; hybrid first
+        if re.search(r"(types? of )?(schedules?|work arrangements?|work (mode|model|setup)s?).{0,30}(willing|open|prefer|comfortable)", l):
+            return pick(*[rf"\b{re.escape(m)}\b" for m in (p.get("work_mode") or ["Hybrid"])])
+        # timed assessments: "do you require an accommodation / adjustment?" -> No (no disability)
+        if p.get("disability") is False and \
+                re.search(r"(timed |online )?assessments?.{0,300}(accommodat|adjustment|accessib)|(require|need).{0,40}(accommodat|adjustment)", l):
+            return pick(r"^no\b")
+        # AI-screening (HiredScore) and keep-my-application consents: Ashu consents (wants future roles too)
+        if re.search(r"consent", l) and re.search(r"hiredscore|ai[- ]assisted|screening tool|evaluate your application|future (job )?opportunit", l):
+            return pick(r"^i consent", r"^yes\b", r"\bconsent\b(?!.*not)")
         ans = rule_answer(label, options, "dropdown", p)
         if ans and ans.selected_option_indices:
             return ans.selected_option_indices[0]
@@ -470,6 +563,40 @@ class WorkdayApplier:
             if t and t not in seen:
                 seen.add(t); out.append(o)
         return out
+
+    def _scroll_find(self, patterns: list[str], exclude: str = "", max_steps: int = 60):
+        """Scroll a long, virtualized popup list (S&P's source list runs '10,000 Able Interns'..., and typing does not
+        filter it, 14 Oct 2026) and return (option, text) for the first pattern found, in pattern order."""
+        seen: dict[str, object] = {}
+        stale = 0
+        for _ in range(max_steps):
+            opts = self._popup_options()
+            new = 0
+            for o in opts:
+                try:
+                    t = o.inner_text().strip()
+                except Exception:
+                    continue
+                if t not in seen:
+                    seen[t] = o; new += 1
+            for pat in patterns:
+                hit = next((t for t in seen if re.search(pat, t, re.I) and not (exclude and re.search(exclude, t, re.I))), None)
+                if hit:
+                    try:
+                        seen[hit].scroll_into_view_if_needed(timeout=3000)
+                        return seen[hit], hit
+                    except Exception:
+                        break                        # scrolled away: keep going, it will be seen again
+            stale = stale + 1 if not new else 0
+            if stale >= 3 or not opts:
+                break
+            try:
+                opts[-1].scroll_into_view_if_needed(timeout=3000)
+                self.pg.mouse.wheel(0, 400)
+            except Exception:
+                break
+            time.sleep(0.4)
+        return None, None
 
     def _open_options(self, ctl) -> list:
         ctl.click()
@@ -494,6 +621,21 @@ class WorkdayApplier:
                                   for x in self.result.filled)
                 if (f.get_attribute("data-automation-id") == "formField-skills" or re.search(r"type to add skills", label, re.I)) \
                         and (skills_done or pg.locator(f"{A('formField-skills')} {A('selectedItem')}").count()):
+                    continue
+                # "Enter today's date below to confirm that you have read ..." (S&P Global HiredScore notice, 14 Oct
+                # 2026): an acknowledgement date, filled with today's date in the MM/DD/YYYY widget
+                if re.search(r"(enter|provide|type) today.?s date|today.?s date (below|to confirm)|date of (signature|acknowledg)", label, re.I) \
+                        and f.locator(A("dateSectionMonth-input")).count():
+                    if f.locator(A("dateSectionYear-input")).first.input_value().strip():
+                        continue
+                    today = time.localtime()
+                    for aid, val in (("dateSectionMonth-input", f"{today.tm_mon:02d}"), ("dateSectionDay-input", f"{today.tm_mday:02d}"),
+                                     ("dateSectionYear-input", str(today.tm_year))):
+                        box = f.locator(A(aid))
+                        if box.count():
+                            box.first.evaluate("e => e.focus()"); pg.keyboard.type(val, delay=80)
+                    pg.keyboard.press("Tab"); time.sleep(0.4)
+                    self._note("Acknowledgement date", time.strftime("%m/%d/%Y"), "today")
                     continue
                 # date of birth (Workday MM/DD/YYYY widget): only from profile.date_of_birth, never guessed
                 if re.search(r"date of birth|\bdob\b|birth ?date", label, re.I) and f.locator(A("dateSectionMonth-input")).count():
@@ -520,6 +662,16 @@ class WorkdayApplier:
                 if btn.count():
                     cur = btn.first.inner_text().strip()
                     if cur and not re.match(r"select one|^$", cur, re.I):
+                        # a value left by an earlier attempt or by autofill is re-checked against the rules: a saved
+                        # draft once submitted "No" to Salesforce's truthfulness acknowledgement (15 Oct 2026)
+                        opts = self._open_options(btn.first)
+                        names = [o.inner_text().strip() for o in opts]
+                        idx = self._choice_for(label, names) if names else None
+                        if idx is not None and names[idx] != cur:
+                            opts[idx].click(); time.sleep(0.6)
+                            self._note(label, f"{names[idx]} (was '{cur}')", self._rule_source(label))
+                        else:
+                            pg.keyboard.press("Escape"); time.sleep(0.3)
                         continue
                     opts = self._open_options(btn.first)
                     names = [o.inner_text().strip() for o in opts]
@@ -536,9 +688,23 @@ class WorkdayApplier:
                     self._note(label, names[idx], self._rule_source(label))
                 elif prompt.count():
                     if f.locator(A("selectedItem")).count() and "0 items selected" not in f.inner_text():
-                        continue
+                        sel = " ".join(x.inner_text() for x in f.locator(A("selectedItem")).all())
+                        # a source kept from an earlier application or the resume parse ("AllJobs", 12 Oct 2026):
+                        # keep it only if it is one Ashu would give (Other, then Naukri), else clear it and pick again
+                        if not re.search(r"how did you hear|^source", label, re.I) or \
+                                re.search(r"naukri|\bother\b|company|career|linkedin|website", sel, re.I):
+                            continue
+                        for x in f.locator(A("selectedItem")).all():
+                            d = x.locator(A("DELETE_charm") + ", [aria-label^='Delete'], [data-automation-id*='delete' i]")
+                            if d.count():
+                                d.first.click(); time.sleep(0.6)
+                        if f.locator(A("selectedItem")).count() and "0 items selected" not in f.inner_text():
+                            self._unknown(f"{label} (pre-selected '{sel.strip()}', not a source Ashu uses)", []); continue
                     inp = prompt.first.locator("input").first
-                    inp.click(); time.sleep(1.2)
+                    inp.click(); time.sleep(0.3)
+                    if inp.input_value().strip():             # text left by an earlier search hides the full list
+                        inp.fill(""); time.sleep(0.5)
+                    time.sleep(0.9)
                     picked = []
                     for _level in range(3):              # categories open a sub-list ("Job Board" -> "Naukri")
                         opts = self._popup_options()
@@ -547,7 +713,7 @@ class WorkdayApplier:
                                 break
                             time.sleep(0.5); opts = self._popup_options()
                         names = [o.inner_text().strip() for o in opts]
-                        if not opts and (picked or not re.search(r"how did you hear|^source|citizenship|nationality|country", label, re.I)):
+                        if not opts and (picked or not re.search(r"how did you hear|^source|citizenship|nationality|country|field of study|major|discipline", label, re.I)):
                             break                        # nothing to choose (searchable fields fall through to typing)
                         idx = None if picked and re.search(r"how did you hear|^source", label, re.I) else self._choice_for(label, names)
                         if idx is None and not picked and re.search(r"citizenship|nationality|country", label, re.I):
@@ -556,14 +722,41 @@ class WorkdayApplier:
                             pg.keyboard.press("Enter"); time.sleep(1.5)
                             opts = self._popup_options(); names = [o.inner_text().strip() for o in opts]
                             idx = self._choice_for(label, names)
-                        if idx is None and not picked and re.search(r"how did you hear|^source", label, re.I):
-                            # long flat source lists are virtualized: search for a truthful source instead of scrolling
-                            for q in ("Other", "Naukri", "Company Website", "Career Site", "LinkedIn"):     # Ashu: Other, then Naukri
+                        if idx is None and not picked and re.search(r"field of study|^major\b|discipline|speciali[sz]ation", label, re.I):
+                            # long A-Z lists load only what matches the typed text: IT, else CS, else Other (Ashu)
+                            for q, pat in (("Information Technology", r"\binformation technology\b"),
+                                           ("Computer Science", r"^computer science\b"),
+                                           ("Computer Engineering", r"^computer (engineering|applications)\b"),
+                                           ("Other", r"^others?$")):
                                 inp.fill(""); pg.keyboard.type(q, delay=40); pg.keyboard.press("Enter"); time.sleep(1.5)
                                 opts = self._popup_options(); names = [o.inner_text().strip() for o in opts]
-                                idx = next((k for k, n in enumerate(names) if q.lower() in n.lower()), None)
+                                idx = next((k for k, n in enumerate(names) if re.search(pat, n, re.I)), None)
                                 if idx is not None:
                                     break
+                        if idx is None and not picked and re.search(r"how did you hear|^source", label, re.I):
+                            # long flat source lists are virtualized: search for a truthful source instead of scrolling
+                            # "Career" finds "<Company> Careers" (Autodesk, 13 Oct 2026); a hit must not name another
+                            # job board ("Glassdoor Website") - the jobs come from company sites, Naukri or LinkedIn
+                            other_board = re.compile(r"indeed|glassdoor|monster|dice|shine|foundit|instahire|ziprecruiter|"
+                                                     r"careerbuilder|51job|104\.com|alljobs|drushim|simplyhired", re.I)
+                            for q in ("Other", "Naukri", "Career", "Company Website", "Website", "LinkedIn", "Internet",
+                                      "Job Board", "Job Portal", "Job Posting", "Job Site", "Online"):  # Ashu: Other, then Naukri; else any job board (14 Oct)
+                                inp.fill(""); pg.keyboard.type(q, delay=40); pg.keyboard.press("Enter"); time.sleep(1.5)
+                                opts = self._popup_options(); names = [o.inner_text().strip() for o in opts]
+                                idx = next((k for k, n in enumerate(names) if q.lower() in n.lower() and not other_board.search(n)
+                                            and not re.search(r"employee|former|referr|agency|recruiter|event|fair|university", n, re.I)), None)
+                                if idx is not None:
+                                    break
+                            if idx is None:
+                                inp.fill(""); time.sleep(0.5)   # don't leave a failed search in the box ("No Items." on the retry)
+                                # typing does not filter some tenants' lists (S&P): scroll the whole list instead
+                                inp.click(); time.sleep(1.2)
+                                o, t = self._scroll_find(
+                                    [r"naukri", r"^other\b|^others$", r"company (career|web)|career(s)? (site|page|website)|corporate (site|website)",
+                                     r"linkedin", r"\bjob ?boards?\b|job (portal|posting|site)s?|online (job|posting)|^internet\b"],
+                                    exclude=other_board.pattern + r"|employee|former|referr|agency|recruiter|event|fair|university|\binterns?\b")
+                                if o is not None:
+                                    opts, names, idx = [o], [t], 0
                         if idx is None and picked:      # inside a category: a real source we used, else its "Other" (never a random first leaf)
                             # the jobs come from company career sites, Naukri or LinkedIn - never claim Glassdoor/Indeed
                             idx = next((k for k, n in enumerate(names) if re.search(r"naukri", n, re.I) and not re.search(r"\(", n)), None)
@@ -571,6 +764,16 @@ class WorkdayApplier:
                                 idx = next((k for k, n in enumerate(names) if re.search(r"company (career )?(site|website)|career site|corporate (site|website)|linkedin", n, re.I)), None)
                             if idx is None:
                                 idx = next((k for k, n in enumerate(names) if re.search(r"^other\b|other (job board|website)s?|general", n, re.I)), None)
+                            if idx is None:   # any generic job board (Ashu, 14 Oct 2026), never a named rival board
+                                idx = next((k for k, n in enumerate(names) if re.search(
+                                    r"\bjob ?boards?\b|job (portal|posting|site|search)s?|online (job|posting|advert)|^internet\b", n, re.I)
+                                    and not re.search(r"indeed|glassdoor|monster|dice|shine|foundit|ziprecruiter|careerbuilder", n, re.I)), None)
+                            if idx is None and len(names) > 6:   # long sub-list: scroll it for the same choices
+                                o, t = self._scroll_find([r"naukri", r"company (career )?(site|website)|career site|corporate", r"linkedin",
+                                                          r"^other\b", r"\bjob ?boards?\b|job (portal|posting|site)s?|^internet\b"],
+                                                         exclude=r"indeed|glassdoor|monster|dice|shine|foundit|employee|referr|agency")
+                                if o is not None:
+                                    opts, names, idx = [o], [t], 0
                             if idx is None and len(names) == 1:
                                 idx = 0
                         if idx is None:
@@ -603,7 +806,14 @@ class WorkdayApplier:
                     idx = self._choice_for(label, names)
                     if idx is None:
                         self._unknown(label, names); continue
-                    radios.nth(idx).check(force=True); time.sleep(0.4)
+                    try:
+                        radios.nth(idx).check(force=True); time.sleep(0.4)
+                    except Exception:
+                        pass                              # Autodesk (13 Oct 2026): "did not change its state" -> click the label below
+                    if not radios.nth(idx).is_checked():  # Applied Materials (12 Oct 2026): the forced check did not register
+                        rid = radios.nth(idx).get_attribute("id")
+                        lab = f.locator(f"label[for='{rid}']") if rid else None
+                        (lab.first if lab is not None and lab.count() else radios.nth(idx)).click(force=True); time.sleep(0.4)
                     self._note(label, names[idx], self._rule_source(label))
                 elif txt.count():
                     el = txt.first
@@ -737,10 +947,13 @@ class WorkdayApplier:
         name or alias); "Other"/"Not Listed" only as a last resort, and then the person reviews it."""
         inp = field.locator("input").first
         for q in searches:
-            fallback = re.fullmatch(r"other|not listed", q.strip(), re.I)
+            fallback = re.fullmatch(r"others?|not listed|school not listed|not in list|other university|other institution|unlisted", q.strip(), re.I)
             inp.click(); inp.fill(""); self.pg.keyboard.type(q, delay=40); self.pg.keyboard.press("Enter"); time.sleep(2)
             if fallback:
-                opt = next((o for o in self._popup_options() if self._norm_school(o.inner_text()) == q.strip().lower()), None)
+                # "Other", "Not Listed", "School Not Listed" - but never a country-specific one ("School Not Listed - UK")
+                opt = next((o for o in self._popup_options()
+                            if re.fullmatch(rf"(school |institution |university )?{re.escape(q.strip().lower())}( school| university| institution)?",
+                                            self._norm_school(o.inner_text()))), None)
             else:
                 opt = next((o for o in self._popup_options() if self.school_option_matches(o.inner_text(), institution)), None)
             if opt:
@@ -772,11 +985,15 @@ class WorkdayApplier:
         pg = self.pg
         self._visible(f"{A('formField-jobTitle')}, {A('add-button')}", timeout=15000)
         jobs = core.get("experience", [])
-        if self._panels("Work-Experience").count() or jobs:
-            self._ensure_panels("Work-Experience", len(jobs))
+        # Salesforce's tenant calls the section "Work History (Optional)" (15 Oct 2026): find whichever name is used
+        sec = next((n for n in ("Work-Experience", "Work-History") if self._panels(n).count()), None) or \
+              next((n for n in ("Work-Experience", "Work-History")
+                    if pg.locator("h2, h3, h4", has_text=n.replace("-", " ")).count()), "Work-Experience")
+        if self._panels(sec).count() or jobs:
+            self._ensure_panels(sec, len(jobs))
             for i, job in enumerate(jobs):
               try:
-                panel = self._panels("Work-Experience").nth(i)
+                panel = self._panels(sec).nth(i)
                 panel.scroll_into_view_if_needed()
                 self._set_text(panel, "formField-jobTitle", job["title"])
                 self._set_text(panel, "formField-companyName", job["company"])
@@ -822,7 +1039,12 @@ class WorkdayApplier:
                 elif panel.locator(f"{A('formField-school')} input").count():
                     aliases = sorted((a for a in self.profile.get("school_aliases") or [] if a), key=len, reverse=True)
                     searches = [re.sub(r"\s*\(.*?\)", "", school)] + [a for a in aliases if a != school]
-                    self._pick_prompt(panel.locator(A("formField-school")), searches + ["Other", "Not Listed"],
+                    # partial / former names first (NSUT was "Netaji Subhas Institute of Technology", NSIT, until 2018),
+                    # then the many spellings of "not listed" (Citi found none of "Other"/"Not Listed", 16 Oct 2026)
+                    searches = searches + [x for x in ("Netaji Subhas", "NSUT", "Netaji Subhas Institute of Technology", "NSIT")
+                                           if x not in searches]
+                    self._pick_prompt(panel.locator(A("formField-school")), searches + ["Other", "Not Listed", "Others",
+                                      "School Not Listed", "Not in list", "Other University", "Other Institution", "Unlisted"],
                                       institution=ed["institution"])
                 deg = panel.locator(f"{A('formField-degree')} button[aria-haspopup='listbox']")
                 if deg.count():
@@ -838,11 +1060,23 @@ class WorkdayApplier:
                 fos = panel.locator(f"{A('formField-fieldOfStudy')} input").first
                 major = str(self.profile.get("major") or "").strip()
                 if major and fos.count() and not panel.locator(f"{A('formField-fieldOfStudy')} {A('selectedItem')}").count():
-                    fos.click(); pg.keyboard.type(major, delay=40); pg.keyboard.press("Enter"); time.sleep(1.5)
-                    opt = next((o for o in self._popup_options() if o.inner_text().strip().lower() == major.lower()), None)
-                    if opt:
-                        opt.click(); time.sleep(0.6)
+                    # long A-Z lists only load what matches the typed text (14 Oct 2026: stuck at "Accounting..."):
+                    # search each discipline in Ashu's order - Information Technology, else Computer Science, else Other
+                    tries = [(major, rf"^{re.escape(major)}$"), ("Information Technology", r"\binformation technology\b"),
+                             ("Computer Science", r"^computer science( (and|&) engineering)?$|^computer science\b"),
+                             ("Computer Engineering", r"^computer (engineering|applications)\b"),
+                             ("Computer", r"\bcomputer (science|engineering)\b"), ("Other", r"^other$|^others$")]
+                    picked = None
+                    for q, pat in tries:
+                        fos.click(); fos.fill(""); pg.keyboard.type(q, delay=40); pg.keyboard.press("Enter"); time.sleep(1.5)
+                        opt = next((o for o in self._popup_options() if re.search(pat, o.inner_text().strip(), re.I)), None)
+                        if opt:
+                            picked = opt.inner_text().strip(); opt.click(); time.sleep(0.6)
+                            break
+                        pg.keyboard.press("Escape")
                     pg.keyboard.press("Escape")
+                    if picked:
+                        self._note("Field of Study", picked, "profile")
                 if self.profile.get("gpa"):
                     self._set_text(panel, "formField-gradeAverage", str(self.profile["gpa"]))
                 years = [int(y) for y in re.findall(r"\d{4}", ed.get("dates", ""))]
@@ -868,20 +1102,40 @@ class WorkdayApplier:
                     el.fill(u)
             self._note("Websites", ", ".join(urls), "profile")
 
+    # Workday's skill catalogue spells many names differently from the resume
+    SKILL_ALIASES = {"llms": "Large Language Models", "rag": "Retrieval Augmented Generation", "nlp": "Natural Language Processing",
+                     "genai": "Generative AI", "ci/cd": "Continuous Integration", "express.js": "Express.js", "sql": "SQL"}
+
+    @staticmethod
+    def _skill_norm(t: str) -> str:
+        t = re.sub(r"\s*\(.*?\)", "", (t or "").lower())          # "Python (Programming Language)" -> "python"
+        return re.sub(r"[^a-z0-9+#]", "", t.replace(".js", "js"))   # "React.js" / "ReactJS" -> "reactjs"
+
     def _fill_skills(self) -> None:
-        """Skills: type each and pick the exact match from the prompt."""
+        """Skills: type each and pick the matching catalogue entry. Accepts the catalogue's own spelling of the same
+        skill ("Python (Programming Language)", "React.js", "Large Language Models (LLM)"), never a different skill."""
         pg = self.pg
-        sk = pg.locator(f"{A('formField-skills')} input").first
-        if sk.count() and not pg.locator(f"{A('formField-skills')} {A('selectedItem')}").count():
-            wanted = (self.profile.get("skills_primary") or [])[:12]
-            added = []
-            for skill in wanted:
-                sk.click(); sk.fill(skill); pg.keyboard.press("Enter"); time.sleep(1.5)
-                opt = next((o for o in self._popup_options() if o.inner_text().strip().lower() == skill.lower()), None)
-                if opt:
-                    opt.click(); added.append(skill); time.sleep(0.5)
-                pg.keyboard.press("Escape"); time.sleep(0.3)
-            self._note("Skills", ", ".join(added) or "(none matched)", "profile")
+        sk = pg.locator(f"{A('formField-skills')} input, input[id*='skills' i][id$='skills' i]").first
+        if not sk.count() or pg.locator(f"{A('formField-skills')} {A('selectedItem')}").count():
+            return
+        wanted = list(dict.fromkeys((self.profile.get("skills_primary") or []) + (self.profile.get("skills_secondary") or [])))
+        added = []
+        for skill in wanted:
+            if len(added) >= 15:
+                break
+            query = self.SKILL_ALIASES.get(skill.lower(), skill)
+            target = {self._skill_norm(skill), self._skill_norm(query), self._skill_norm(skill).replace("js", "")}
+            sk.click(); sk.fill(query); pg.keyboard.press("Enter"); time.sleep(1.5)
+            opts = self._popup_options()
+            opt = next((o for o in opts if o.inner_text().strip().lower() == query.lower()), None) or \
+                  next((o for o in opts if self._skill_norm(o.inner_text()) in target
+                         or self._skill_norm(o.inner_text()).removesuffix("js") in target), None)
+            if opt:
+                name = opt.inner_text().strip()
+                if name not in added:
+                    opt.click(); added.append(name); time.sleep(0.5)
+            pg.keyboard.press("Escape"); time.sleep(0.3)
+        self._note("Skills", ", ".join(added) or "(none matched)", "profile")
 
     def submit_blockers(self) -> tuple[list[str], list[str]]:
         """(unanswered, doubtful): fields left for the person (value None / source 'unknown') and answers whose
@@ -924,6 +1178,8 @@ class WorkdayApplier:
     def _unknown(self, label: str, options: list[str]) -> None:
         log.info("    %-45s -> (no answer) options=%s", label[:45], options[:6])
         self.result.filled.append({"label": label, "value": None, "source": "unknown", "options": options})
+        from ..ask_ashu import record
+        record(label, options, "workday", getattr(self, 'company', ''))
 
     def _next(self, step_name: str) -> bool:
         pg = self.pg

@@ -242,3 +242,19 @@ def test_workday_school_match_is_exact():
     assert not w.school_option_matches("Example Institute of Technology and Management", inst)
     assert not w.school_option_matches("Example Inst", inst)
     assert not w.school_option_matches("Example Institute of Technology, Other City Campus", inst)
+
+
+@pytest.mark.parametrize("label", ["Where did you hear about us", "How did you hear about this job? *",
+                                   "Where did you first learn about this opening?"])
+def test_heard_about_us_picks_a_job_source(label):
+    # Detect Technologies (15 Oct 2026): "Where did you hear about us" with no Naukri/Other option stopped the form
+    g = applier(how_heard=["Other", "Naukri", "Job Board", "LinkedIn", "Website"])
+    assert g._pick(label, ["Linkedin", "Twitter", "Web", "Facebook"]) == "Linkedin"
+    assert g._pick(label, ["Naukri", "Referral", "Other"]) == "Other"
+
+
+@pytest.mark.parametrize("label", ["job applied for", "position applying for *", "role applying for"])
+def test_position_applying_for_text_gets_the_role(label):
+    g = applier()
+    g.role = "AI/ML Engineer"
+    assert g._question_value(label) == "AI/ML Engineer"

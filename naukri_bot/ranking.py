@@ -116,7 +116,7 @@ GENERIC_TITLES = {"engineer", "developer", "programmer", "software engineer", "e
 
 def title_included(title: str, profile: dict) -> bool:
     inc = profile.get("include_title_keywords") or []
-    t = title.lower()
+    t = re.sub(r"\s+", " ", title.lower())   # "AI  Security Engineer" (double space) must still match "ai ... engineer" keywords
     core = re.sub(r"[^a-z ]", " ", t).split()
     if " ".join(core) in {"engineer", "developer", "programmer", "executive"}:
         return False  # a bare "Engineer" says nothing about the role (observed: an energy-plant post)
@@ -124,7 +124,10 @@ def title_included(title: str, profile: dict) -> bool:
 
 
 def title_excluded(title: str, profile: dict) -> bool:
-    t = title.lower()
+    # "Member of Technical Staff" is an IC title at every level (Handshake, Composio), not a staff-level role
+    t = re.sub(r"members? of (the )?technical staff", "mts", title.lower())
+    # EY's "GDS-Staff" / "Staff Consultant" is its junior grade (2-4 yrs), not a staff-level role (Neo, 15 Oct 2026)
+    t = re.sub(r"\bgds[- ]staff\b|\bstaff (consultant|analyst)\b", "gds", t)
     if any(_kw_in(k, t) for k in profile.get("exclude_title_keywords", []) or []):
         return True
     # whole words only: "java" must not exclude "JavaScript Developer", "rust" must not hit "Trust & Safety"
