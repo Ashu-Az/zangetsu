@@ -330,3 +330,16 @@ def test_total_experience_in_months_is_all_of_it():
     f = lambda q: (lambda r: r and r.answer_text)(rule_answer(q, [], "text", p))
     assert f("Total Experience (Months) *") == "24"
     assert f("Additional months of experience") == "0"
+
+
+def test_relocation_city_any_offered():
+    from naukri_bot.rules import rule_answer
+    p = {"willing_to_relocate": True, "preferred_locations": ["Delhi", "Bengaluru"]}
+    opts = ["Hyderabad, Telangana", "Bengaluru, Karnataka", "Skip this question"]
+    a = rule_answer("Please select the city you are currently residing or willing to relocate to", opts, "radio", p)
+    assert a.selected_option_indices == [1]          # Bengaluru beats Hyderabad (preferred order)
+    a2 = rule_answer("Please select the city you are currently residing or willing to relocate to",
+                     ["Hyderabad, Telangana", "Skip this question"], "radio", p)
+    assert a2.selected_option_indices == [0]         # any real city beats Skip
+    assert rule_answer("Please select the city you are currently residing or willing to relocate to",
+                       opts, "radio", {"willing_to_relocate": False}) is None

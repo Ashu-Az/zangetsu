@@ -442,6 +442,19 @@ def rule_answer(question: str, options: list[str], kind: str, profile: dict) -> 
             i = next((k for k, o in enumerate(options) if re.search(alias, o, re.I)), None)
             if i is not None:
                 return _answer("", i, options)
+    # "Select the city you are currently residing or willing to relocate to" (Neo drawer, 16 Oct 2026):
+    # any offered city is fine (Ashu: "any location") - preferred_locations order first, else the first
+    # real city; never "Skip this question"
+    if has_opts and profile.get("willing_to_relocate") \
+            and re.search(r"city .{0,40}(residing|based|living|relocat|mov(e|ing)|shift)|(residing|relocat\w*) .{0,20}city", q):
+        for city in profile.get("preferred_locations") or []:
+            alias = {"Bengaluru": "bengaluru|bangalore", "Gurugram": "gurugram|gurgaon", "Delhi": "delhi|ncr"}.get(city, re.escape(city.lower()))
+            i = next((k for k, o in enumerate(options) if re.search(alias, o, re.I)), None)
+            if i is not None:
+                return _answer("", i, options)
+        i = next((k for k, o in enumerate(options) if not re.search(r"skip|none|prefer not|other", o, re.I)), None)
+        if i is not None:
+            return _answer("", i, options)
     # ownership / high-agency culture checks: Yes (Prodigal, 13 Oct 2026)
     if re.search(r"(thrive|comfortable|good fit|someone who).{0,40}(high )?(agency|ownership)|high agency", q) and not re.search(r"how|describe|example|tell", q):
         return _answer("", _yes_no(options, True), options) if has_opts else _answer("Yes")
