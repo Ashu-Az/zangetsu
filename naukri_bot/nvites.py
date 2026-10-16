@@ -78,6 +78,34 @@ def parse_details(text: str) -> tuple[list[str], str]:
     return skills, jd
 
 
+def _dismiss_overlays(pg) -> None:
+    """Close promo modals (e.g. 'Naukri 360 Pro unlocked') whose backdrop swallows clicks on the inbox cards."""
+    for _ in range(3):
+        if not pg.locator(".mc__backdrop--show, [class*=backdrop][class*=show]").count():
+            return
+        closed = False
+        for sel in (".mc__close", "[class*=modal] [class*=close]", "[aria-label='Close']", "button:has-text('Close')",
+                    "button:has-text('Maybe later')", "button:has-text('Skip')"):
+            btn = pg.locator(sel)
+            if btn.count() and btn.first.is_visible():
+                try:
+                    btn.first.click(timeout=3000); closed = True; break
+                except Exception:
+                    pass
+        if not closed:
+            pg.keyboard.press("Escape")
+        time.sleep(1)
+
+
+def _click_card(pg, card) -> None:
+    """Click an inbox card; if an overlay still intercepts, click it in the page (React listens on the element)."""
+    _dismiss_overlays(pg)
+    try:
+        card.click(timeout=5000)
+    except Exception:
+        card.evaluate("e => e.click()")
+
+
 def collect(browser, max_scrolls: int = 8) -> list[NVite]:
     pg = browser.page
     browser.goto(INBOX_URL, settle=(5, 7))
@@ -92,13 +120,19 @@ def collect(browser, max_scrolls: int = 8) -> list[NVite]:
     out: list[NVite] = []
     for i in range(pg.locator(CARD).count()):
         card = pg.locator(CARD).nth(i)
-        info = parse_card(card.inner_text())
-        if not info:
+        try:
+            # the inbox list can shrink while it is read (card 22 vanished, 14 Oct 2026): skip, don't crash
+            if i >= pg.locator(CARD).count():
+                break
+            info = parse_card(card.inner_text(timeout=5000))
+            if not info:
+                continue
+            unread = "unread" in (card.get_attribute("class", timeout=5000) or "")
+            _click_card(pg, card)
+            time.sleep(2)
+            details = pg.locator(DETAILS).first.inner_text() if pg.locator(DETAILS).count() else ""
+        except Exception:
             continue
-        unread = "unread" in (card.get_attribute("class") or "")
-        card.click()
-        time.sleep(2)
-        details = pg.locator(DETAILS).first.inner_text() if pg.locator(DETAILS).count() else ""
         skills, jd = parse_details(details)
         out.append(NVite(index=i, unread=unread, skills=skills, description=jd,
                          external_urls=sorted(set(u.rstrip(".,;") for u in URL.findall(jd))), **info))
@@ -112,9 +146,12 @@ def open_invite(browser, invite: NVite) -> bool:
         browser.goto(INBOX_URL, settle=(5, 7))
     cards = pg.locator(CARD)
     for i in range(cards.count()):
-        info = parse_card(cards.nth(i).inner_text())
+        try:
+            info = parse_card(cards.nth(i).inner_text(timeout=5000))
+        except Exception:
+            continue
         if info and info["title"] == invite.title and info["company"] == invite.company:
-            cards.nth(i).click()
+            _click_card(pg, cards.nth(i))
             time.sleep(2)
             return True
     return False

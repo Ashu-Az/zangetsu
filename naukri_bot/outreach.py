@@ -42,7 +42,10 @@ SENT_PATH = STATE_DIR / "outreach_sent.json"
 OUT_DIR = OUTPUT_DIR / "outreach"
 # addresses that are never a recruiter's inbox
 NOT_RECRUITER = re.compile(r"(?i)naukri|noreply|no-reply|donotreply|example\.|privacy|grievance|abuse|support@|"
-                           r"unsubscribe|postmaster|webmaster|@sentry|\.png$|\.jpg$")
+                           r"unsubscribe|postmaster|webmaster|@sentry|\.png$|\.jpg$|"
+                           # inboxes for other purposes found in JDs (Aon's reasonableaccommodations@, 14 Oct 2026)
+                           r"accommodat|accessib|disabilit|compliance|legal@|security@|ethics|whistle|"
+                           r"billing|invoice|accounts@|sales@|marketing@|media@|press@|investor")
 GENERIC_LOCAL = re.compile(r"(?i)^(hr|jobs?|careers?|recruit(ment|ing)?|talent|hiring|resume|cv|apply|info|hello|contact|team)\b")
 
 
@@ -129,6 +132,22 @@ def already_contacted(tracker: Tracker) -> tuple[set[str], set[str]]:
     return addresses, recent_domains
 
 
+def _company_key(name: str) -> str:
+    """'Eucloid Data Solutions' / 'Eucloid' -> 'eucloid' (first word, letters only)."""
+    w = re.findall(r"[a-z]+", (name or "").lower())
+    return w[0] if w else ""
+
+
+def rejected_companies(tracker: Tracker, days: int = 90) -> set[str]:
+    """Companies that turned the candidate down recently (status 'rejected' in the application log): no new
+    emails to them for a while; another message right after a no looks careless."""
+    if not tracker.applications_csv.exists():
+        return set()
+    cutoff = (datetime.now() - timedelta(days=days)).isoformat()
+    return {_company_key(r.get("company", "")) for r in csv.DictReader(open(tracker.applications_csv, newline="", encoding="utf-8"))
+            if r.get("status") == "rejected" and r.get("timestamp", "") >= cutoff} - {""}
+
+
 def clean_title(title: str, company: str = "") -> str:
     """'Gen AI _Opportunity at Fractal Analytics' -> 'Gen AI'; 'Hiring | AI Engineer | StatusNeo' -> 'AI Engineer'."""
     t = re.sub(r"[_|]+", " | ", title or "")
@@ -168,10 +187,14 @@ def select(settings: Settings, profile: dict, tracker: Tracker, sources: list[st
     for lead in leads:
         if lead.email in addresses or lead.domain in domains or lead.domain in seen_domains:
             continue
+        if _company_key(lead.company) in rejected_companies(tracker):
+            log.debug("skip %s (%s): company rejected recently", lead.email, lead.company)
+            continue
         reason = eligibility(lead.posting(), ApplyMode.NAUKRI, settings, profile)
         years = float(settings.experience_years) if settings.experience_years else None
-        # a cold email needs a closer fit than a one-click apply: at most 1 year above the candidate's experience
-        if not reason and lead.experience and not lead.posting().experience_fits(years, slack=1):
+        # a cold email needs a closer fit than a one-click apply: the role's minimum must not exceed the candidate's
+        # years (Eucloid, 12 Oct 2026: a 3-7 yr role answered a 2-yr email with "experience does not closely align")
+        if not reason and lead.experience and not lead.posting().experience_fits(years, slack=0):
             reason = f"experience_too_far_for_email:{lead.experience}"
         if not reason and lookalike_domain(lead.email, lead.company):
             reason = f"lookalike_domain:{lead.domain}"
@@ -200,7 +223,10 @@ def compose(lead: Lead, profile: dict, coverage: dict) -> tuple[str, str]:
     years = profile.get("total_experience_years", "")
     notice = profile.get("notice_period_days", "")
     title = clean_title(lead.title, lead.company) or "the open role"
-    subject = f"Application for {title} - {name} ({years} yrs, {notice}-day notice)"
+    # immediate joiner (Ashu, 15 Oct 2026: last day at Quess 20 Oct) instead of the notice period
+    immediate = bool(profile.get("immediate_joiner"))
+    lwd = profile.get("last_working_day_text") or "20 Oct"
+    subject = f"Application for {title} - {name} ({years} yrs, " + ("immediate joiner)" if immediate else f"{notice}-day notice)")
     # technologies only: "Code reviews" or "Agile" are practices, not "the stack I work in"
     practice = re.compile(r"code reviews?|agile|scrum|testing|documentation|communication|problem[- ]solving|teamwork|sdlc", re.I)
     matched = [m for m in coverage.get("matched", []) if len(m) > 1 and not practice.fullmatch(m.strip())][:5]
@@ -215,7 +241,8 @@ def compose(lead: Lead, profile: dict, coverage: dict) -> tuple[str, str]:
         "",
         *[f"- {h}" for h in highlights[:3]],
         "" if highlights else "",
-        f"My notice period is {notice} days. I've attached a resume tailored to this role and would be glad to talk.",
+        (f"I can join immediately (my last day at my current job is {lwd})." if immediate else f"My notice period is {notice} days.")
+        + " I've attached a resume tailored to this role and would be glad to talk.",
         "",
         "Thanks,",
         name,
@@ -261,6 +288,12 @@ def run(settings: Settings, profile: dict, send: bool, max_n: int, sources: list
             pdf, rep = tailored_pdf(lead.jd, lead.title, lead.company, playwright=playwright, url=lead.url or lead.email,
                                     compact=True)
             coverage = rep.get("coverage") or {"matched": rep.get("ats_hit", [])}
+            min_cov = int(os.getenv("OUTREACH_MIN_COVERAGE", "60"))
+            if rep.get("ats") is not None and float(rep["ats"]) < min_cov:
+                log.info("  skipped (keyword coverage %s%% < %d%%): %s | %s", rep["ats"], min_cov, lead.title[:40], lead.company[:25])
+                results.append({"email": lead.email, "title": lead.title, "company": lead.company, "status": "skipped_low_match",
+                                "coverage": rep.get("ats")})
+                continue
             subject, body = compose(lead, profile, coverage)
             msg = build_message(lead, profile, sender or profile.get("email", ""), subject, body, Path(pdf))
             slug = re.sub(r"[^a-z0-9]+", "-", f"{lead.company}-{lead.title}".lower())[:60].strip("-")

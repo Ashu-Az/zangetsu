@@ -130,3 +130,10 @@ def test_company_blocklist_and_dedupe():
     mk = lambda i, c, t: (JobPosting(job_id=str(i), url="u", title=t, company=c), ApplyMode.NAUKRI)
     pairs = [mk(1, "Infosys", "Python Developer"), mk(2, "Infosys ", "Python  Developer"), mk(3, "Infosys", "AI Engineer"), mk(4, "PwC", "Python Developer")]
     assert [j.job_id for j, _ in dedupe_company_title(pairs)] == ["1", "3", "4"]
+
+
+def test_ey_gds_staff_is_not_a_staff_level_title():
+    from naukri_bot.ranking import title_excluded
+    p = {"exclude_title_keywords": ["staff", "senior"]}
+    assert not title_excluded("EY GDS-Staff-AppSec-AI-Automation-Engineer", p)
+    assert title_excluded("Staff Software Engineer", p)

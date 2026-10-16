@@ -22,16 +22,42 @@ def _fmt(n: float) -> str:
     return str(int(n)) if float(n).is_integer() else f"{n:g}"
 
 
+# Spellings recruiters use for skills the profile lists under another name (13 Oct 2026 questionnaire replay).
+SKILL_ALIASES = (
+    (r"\blarge language models?\b", "llms"), (r"\bgenerative ?ai\b", "generative ai"), (r"\breact\.?js\b", "react"),
+    (r"\bnode\.? ?js\b", "node.js"), (r"\bexpress\.? ?js\b", "express.js"), (r"\bnext\.? ?js\b", "next.js"),
+    (r"\brestful( apis?| services?)?\b|\brest apis?\b", "rest api"), (r"\bscikit[- ]?learn\b|\bsklearn\b", "scikit-learn"),
+    (r"\bpostgres\b", "postgresql"), (r"\bmongo\b", "mongodb"), (r"\bhugging ?face\b", "transformers"),
+    (r"\bml\b", "machine learning"), (r"\bdl\b", "deep learning"),
+    (r"\bapplication (and|&) product security\b|\bproduct security\b|\bapp ?sec\b", "application security"),
+    (r"\bai agents?\b|\bagentic (systems?|workflows?|frameworks?)\b|\bmulti[- ]agent( systems?)?\b", "agentic ai"),
+)
+# Keys too broad to count on their own when the question names something more specific ("Voice AI", "AI Agents").
+GENERIC_SKILLS = {"ai", "ml", "aiml", "alml"}
+_FILLER = r"\b(and|or|&|the|a|an|in|with|of|on|using|based|related|relevant|development|developer|engineering|engineer|" \
+          r"solutions?|technologies|technology|tools?|projects?|work|experience|hands[- ]on|field|domain|/|-)\b"
+
+
 def _skill_years(skill_text: str, profile: dict) -> float | None:
-    """Years for the skill named in the question, or 0 if it is not a known skill, or None if no skill is named."""
+    """Years for the skill named in the question, or 0 if it is not a known skill, or None if no skill is named.
+    The most specific matching key wins ("Agentic AI" -> agentic ai, not the bare "ai"); a list of skills
+    ("Python and LangChain") takes the strongest."""
     t = skill_text.lower()
+    for pat, canon in SKILL_ALIASES:
+        t = re.sub(pat, canon, t)
     table = {k.lower(): float(v) for k, v in (profile.get("skill_years") or {}).items()}
-    best = None
-    for name, yrs in sorted(table.items(), key=lambda kv: -len(kv[0])):
-        if re.search(r"(?<![a-z0-9+#.])" + re.escape(name) + r"(?![a-z0-9+#])", t):
-            best = yrs if best is None else max(best, yrs)
-    if best is not None:
-        return best
+    hits = [(name, yrs) for name, yrs in table.items()
+            if re.search(r"(?<![a-z0-9+#.])" + re.escape(name) + r"(?![a-z0-9+#])", t)]
+    specific = [(n, y) for n, y in hits if n not in GENERIC_SKILLS]
+    if specific:
+        # drop keys contained in a longer matched key ("ai framework" beats "ai", "llm" inside "llm ops")
+        specific = [(n, y) for n, y in specific if not any(n != o and n in o for o, _ in specific)]
+        return max(y for _, y in specific)
+    if hits:
+        rest = re.sub(r"\b(" + "|".join(map(re.escape, GENERIC_SKILLS)) + r")\b|artificial intelligence|machine learning", " ", t)
+        rest = re.sub(_FILLER, " ", rest)
+        if not re.search(r"[a-z]{2,}", rest):   # only "AI", "AI ML", "AI/ML" -> the generic years
+            return max(y for _, y in hits)
     known = [s.lower() for s in (profile.get("skills_primary") or []) + (profile.get("skills_secondary") or [])]
     for s in sorted(known, key=len, reverse=True):
         if re.search(r"(?<![a-z0-9+#.])" + re.escape(s) + r"(?![a-z0-9+#])", t):
@@ -81,12 +107,18 @@ def _pick_bucket(value: float, options: list[str], unit_hint: str = "") -> int |
     return best
 
 
+YES_WORDS = re.compile(r"^(yes|yep|yeah|yup|sure|absolutely|of course|definitely|true)\b", re.I)
+NO_WORDS = re.compile(r"^(no|nope|nah|false|not really)\b", re.I)
+
+
 def _yes_no(options: list[str], yes: bool) -> int | None:
     want = "yes" if yes else "no"
     for i, o in enumerate(options):
         if o.strip().lower() == want or o.strip().lower().startswith(want + " ") or o.strip().lower().startswith(want + ","):
             return i
-    return None
+    # casual wordings: "Yep!" / "No" (cl-0910 site forms), "Absolutely" / "Not really"
+    pat = YES_WORDS if yes else NO_WORDS
+    return next((i for i, o in enumerate(options) if pat.match(o.strip())), None)
 
 
 def with_unit(question: str, text: str) -> str:
@@ -127,16 +159,265 @@ def _tenure_required(q: str) -> float | None:
     return float(m.group(1)) if m else None
 
 
+def _opt(options: list[str], *pats: str) -> int | None:
+    for pat in pats:
+        i = next((k for k, o in enumerate(options) if re.search(pat, o, re.I)), None)
+        if i is not None:
+            return i
+    return None
+
+
+def _profile_fact(q: str, options: list[str], profile: dict, question_raw: str = "") -> QuestionAnswer | None:
+    """Plain facts recruiters ask that Ashu had to type by hand (answers.csv 'human' rows, 13 Oct 2026)."""
+    has_opts = bool(options)
+
+    def yn(yes: bool) -> QuestionAnswer | None:
+        if has_opts:
+            i = _yes_no(options, yes)
+            return _answer("", i, options) if i is not None else None
+        return _answer("Yes" if yes else "No")
+
+    # ---- "I acknowledge that I have ... answered the above questions truthfully" (Salesforce, 15 Oct 2026): Yes. It runs
+    # first - its legal wording ("employment will be terminated") is not a question about past terminations
+    if re.search(r"\bi (acknowledge|certify|confirm)\b.{0,80}(answered|provided|information).{0,60}(truthful|accurate|true|correct)|"
+                 r"select \W?yes\W? if you acknowledge", q):
+        i = _yes_no(options, True) if has_opts else None
+        if has_opts:
+            return _answer("", i, options) if i is not None else None
+        return _answer("Yes")
+    # "Min. 3+ years experience?" style checks: Yes up to profile.claim_min_years_yes_upto (Ashu, 15 Oct 2026: "just say yes").
+    # Numeric questions ("how many years") still get the real number; higher bars (4-7 years) keep the tenure rules below.
+    cap = profile.get("claim_min_years_yes_upto")
+    if cap and "experience" in q and not re.search(r"\bhow (many|much|long)\b|\bnumber of\b|\bwhat\b|\bmonths?\b|\bin years\b", q):
+        m = re.search(r"(?:at least|minimum(?: of)?|min\.?|more than|over)\s*(\d+(?:\.\d+)?)", q) or \
+            re.search(r"(\d+(?:\.\d+)?)\s*(?:\+|plus)", q) or re.search(r"(\d+(?:\.\d+)?)\s*(?:[-–]|to)\s*\d+\s*(?:years|yrs)", q)
+        if m and float(m.group(1)) <= float(cap) and (not has_opts or _yes_no(options, True) is not None):
+            return yn(True)
+    # "Which IIT did you graduate from?" -> his real college (Ashu, 15 Oct 2026: "just say nsut")
+    if re.search(r"which (iit|nit|iiit)s?\b|name of (your|the) (iit|nit|iiit)\b|(iit|nit|iiit) (name|college|attended)", q):
+        if has_opts:
+            i = _opt(options, r"netaji|nsut", r"^\s*others?\b")
+            return _answer("", i, options) if i is not None else None
+        return _answer("NSUT")
+
+    # "Year of Completion (month/year)" of the degree: 10/2024 (not 10th/12th)
+    if not has_opts and re.search(r"(year|date) of (completion|passing|graduation)", q) and re.search(r"month", q) \
+            and not re.search(r"10th|12th|class|school|hsc|ssc|diploma|post[- ]?grad|master", q) and profile.get("graduation_year"):
+        mo = int(profile.get("graduation_month") or 6)
+        return _answer(f"{mo:02d}/{profile['graduation_year']}")
+    # year of graduation / passing out
+    if re.search(r"(year|batch) of (graduation|passing|pass ?out)|graduation year|passing (out )?year|pass ?out year|which batch", q) \
+            and profile.get("graduation_year") and not re.search(r"10th|12th|class|school|hsc|ssc", q):
+        y = str(profile["graduation_year"])
+        if has_opts:
+            i = _opt(options, re.escape(y)); return _answer("", i, options) if i is not None else None
+        return _answer(y)
+    # UAN / Form 16 / PF records from past employers (yes: all full-time jobs were on payroll)
+    if re.search(r"\buan\b|form ?16|\bpf\b (account|number|deduct)|provident fund", q) and re.match(r"^(do|does|have|has|are|is|did) you|^(uan|form)", q) \
+            and not re.search(r"number|share|provide|mention|enter", q):
+        return yn(True)
+    # English: speak and write
+    if re.search(r"\benglish\b", q) and re.search(r"comfortable|fluen|proficien|communicat|speak|write|level", q):
+        if has_opts:
+            i = _opt(options, r"speak and write|read.{0,10}write.{0,10}speak|both|fluent|professional|advanced|full|native|^yes")
+            return _answer("", i, options) if i is not None else None
+        if re.match(r"^(are|is|do|can) you", q):
+            return _answer("Yes")
+    # employment status: employed, serving notice
+    # about Ashu only: "Are any of your relatives currently employed by X?" is a conflict question (S&P Global answered
+    # Yes through this rule, 13 Oct 2026)
+    if has_opts and (re.search(r"\byour (current )?employment status|^(what is )?(current )?employment status|^are you (currently )?(employed|working)\b", q)
+                     and not re.search(r"relati|family|friend|spouse|partner|blood|kin\b|anyone|someone|person", q)):
+        if profile.get("serving_notice"):
+            i = _opt(options, r"serving notice", r"currently employed", r"^employed", r"^yes")
+        else:
+            i = _opt(options, r"currently employed(?!.*notice)", r"^employed", r"^yes")
+        return _answer("", i, options) if i is not None else None
+    # phone and email in one box
+    if not has_opts and re.search(r"(contact|mobile|phone)( number)?.{0,25}(email|e-mail|mail id)|(email|mail id).{0,25}(contact|mobile|phone)|number and email", q):
+        phone = re.sub(r"^\+91[- ]?", "", str(profile.get("phone") or ""))
+        return _answer(f"{phone}, {profile.get('email')}")
+    # current company / employer
+    if not has_opts and re.fullmatch(r"(your |what is your |name of (your )?)?(current|present) (company|employer|organi[sz]ation)( name)?\??", q) \
+            and profile.get("current_company"):
+        return _answer(str(profile["current_company"]))
+    # courses / certifications in GenAI or AI (Ashu: yes)
+    if re.search(r"(done|completed|taken|any) .{0,30}(courses?|certifications?|training)", q) and re.search(r"gen ?ai|\bai\b|agentic|machine learning|\bml\b|llm", q):
+        return yn(True)
+    # relocation assistance / allowance: not needed (Ashu, 14 Oct 2026) - before the relocation rules, which say Yes
+    if re.search(r"relocation (assistance|support|allowance|package|benefits?|help)", q) and profile.get("relocation_assistance_needed") is False:
+        return yn(False)
+    # immediate joiner (Ashu, 14 Oct 2026: free from 21 Oct, answer Yes)
+    if profile.get("immediate_joiner") and re.search(r"immediate(ly)? join(er|ing)?\b|join immediately|immediate joiner", q) \
+            and not re.search(r"how many|days|date", q):
+        return yn(True)
+    # voluntary diversity questions: truthful answers from the profile (Ashu, 14 Oct 2026)
+    if has_opts and re.search(r"sexual orientation|lesbian|gay|bisexual|lgbt|queer", q) and "lgbtq" in profile:
+        i = _yes_no(options, bool(profile["lgbtq"])) if re.match(r"^(are|do|is) you|consider yourself|member of|identify as (a |an )?(member|lgbt)", q) else None
+        if i is None and profile.get("sexual_orientation"):
+            i = _opt(options, r"^hetero", r"\bstraight\b", r"heterosexual")
+        return _answer("", i, options) if i is not None else None
+    if has_opts and re.search(r"\btransgender\b", q) and "transgender" in profile:
+        i = _yes_no(options, bool(profile["transgender"])); return _answer("", i, options) if i is not None else None
+    if has_opts and re.search(r"hispanic|latin[oa]|latinx", q) and re.match(r"^(are|is) you|^hispanic|^ethnicity", q) and "hispanic_latino" in profile:
+        i = _yes_no(options, bool(profile["hispanic_latino"]))
+        if i is None:
+            i = _opt(options, r"not hispanic", r"^no\b")
+        return _answer("", i, options) if i is not None else None
+    if has_opts and re.search(r"\brace\b|ethnicit|ethnic (group|background|origin)", q) and profile.get("race_ethnicity"):
+        # never "American Indian / Alaska Native / Indigenous": that is a different group
+        i = _opt(options, r"^(?!.*(american indian|alaska|native|indigen|aborigin)).*\b(asian )?indian\b", r"south asian",
+                 r"^asian\b", r"\basian\b(?!.*pacific)", r"\basian\b")
+        return _answer("", i, options) if i is not None else None
+    # work permit for the job's country: Indian citizen applying to India roles (Workday, 14 Oct 2026)
+    if re.search(r"(valid )?work (permit|authori[sz]ation|visa)\b", q) and re.match(r"^(do|are|have) you|^(valid )?work", q) \
+            and not re.search(r"sponsor|\b(us|usa|u\.s\.|uk|canada|europe|germany|singapore|dubai|uae)\b", q) \
+            and str(profile.get("work_authorized_in") or "").lower().startswith("india"):
+        return yn(True)
+    # interview / assessment rounds (cult.fit "DSA round this Friday?", 14 Oct 2026): Yes when online or unspecified;
+    # in person outside the NCR cities stays with the face-to-face rule (No)
+    if re.search(r"available (to (take|attend|appear)|for) (a |an |the )?.{0,30}(round|interview|test|assessment|discussion|call)", q) \
+            and not re.search(r"face to face|f2f|in[- ]person|walk[- ]?in|offline|visit|at (our|the) office|venue", q):
+        if has_opts:
+            i = _yes_no(options, True)
+            return _answer("", i, options) if i is not None else None
+        return _answer("Yes")
+    # offers in hand (Ashu, 14 Oct 2026: none)
+    if "has_current_offers" in profile and re.search(r"(current|other|any|existing|pending) (job )?offers?\b|offers? (in hand|you are considering)|holding (an|any) offers?", q):
+        if has_opts or re.match(r"^(do|are|have) you", q):
+            return yn(bool(profile["has_current_offers"]))
+        return _answer("No offers in hand at the moment.") if not profile["has_current_offers"] else None
+    # research output (Ashu, 14 Oct 2026): no papers or preprints; open-source AI/ML work on GitHub (S-SPPO reproduction)
+    if profile.get("research_output") == "open_source" and re.search(r"publications?|preprints?|research output|open[- ]source contributions?|papers? (published|accepted)", q):
+        if has_opts:
+            return yn(True) if re.search(r"open[- ]source", q) else yn(False)
+        if re.match(r"^(do|have|are) you", q) or "research output" in q:
+            link = (profile.get("links") or {}).get("github", "")
+            return _answer("No peer-reviewed papers yet. My AI/ML work is open source on GitHub, for example my reproduction of "
+                           f"the S-SPPO self-play preference optimisation paper ({link}).".replace(" ()", ""))
+    # statistics screening questions (analytics forms, 15 Oct 2026)
+    # "Does a result with a confidence 97% mean the result is true 97% of the times?" -> No
+    if re.search(r"confidence (level |interval )?(of )?\d+ ?%|\d+ ?% confidence", q) and re.search(r"true|correct|right|probability|chance", q) \
+            and re.match(r"^(does|is|do)\b", q):
+        return yn(False)
+    # "Correlation of 0.7 ... does this show that increasing X will increase Y?" -> No (correlation is not causation)
+    if re.search(r"\bcorrelat", q) and re.search(r"(show|prove|mean|imply)\w*.{0,40}(increas|decreas|caus|lead|will)", q):
+        return yn(False)
+    # "Name of your University / College" (free text; Citi Workday, 16 Oct 2026)
+    if not has_opts and re.fullmatch(r"(what is )?(the )?(name of (your |the )?)?(university|college|institute|institution|alma mater)"
+                                     r"( name)?( attended)?\??", q) and profile.get("school"):
+        return _answer(str(profile["school"]))
+    # "Please fill the form (mandatory): https://forms.gle/..." (Nxtwave, 16 Oct 2026): the model answered "Yes - filled
+    # the form" when nobody had. Record the link for Ashu (output/forms_to_fill.md, reported after every run) and pick the
+    # option that commits to filling it; he fills it the same day, which makes the answer true.
+    m = re.search(r"(https?://(?:forms\.gle|docs\.google\.com/forms|forms\.office\.com|[\w.-]*typeform\.com|[\w.-]*jotform\.com)\S*)", question_raw or q)
+    if m and re.search(r"fill|complete|submit|form", q):
+        _record_form(m.group(1).rstrip(".,)"), question_raw or q)
+        if has_opts:
+            i = _opt(options, r"^\s*yes", r"will fill|fill(ed)? (it|the form)", r"\bdone\b")
+            return _answer("", i, options) if i is not None else None
+        return _answer("I'll fill the form today.")
+    # "How did you hear about us?" as a free-text box: these jobs are found through Naukri (Ashu's sources: Other, then
+    # Naukri; a dropdown is handled by the form adapters)
+    if not has_opts and re.fullmatch(r"(how did you (hear|learn|find out) about (us|this (job|role|position|opening))|"
+                                     r"where did you (hear|find|see) (about )?(us|this (job|role|opening))|source( of application)?)\??", q):
+        return _answer("Naukri.com")
+    # ---- inbox questions, 16 Oct 2026
+    # "Date Available" / earliest start date: the day after the last working day (immediate joiner)
+    if not has_opts and re.fullmatch(r"(date available|available (from|date)|earliest (possible )?start date|start date|"
+                                     r"when can you start|joining date)( \(dd/mm/yyyy\))?\??", q):
+        d = availability_date(profile)
+        if d:
+            return _answer(d.strftime("%d/%m/%Y"))
+    # notice / start options with an "immediately" choice: immediate joiner (Ashu, 14 Oct 2026)
+    if has_opts and profile.get("immediate_joiner") and re.search(r"notice period|start date|available to (start|join)|join", q):
+        i = _opt(options, r"^\s*(available )?immediate", r"\bimmediate(ly)?\b", r"^\s*0\s*(days)?$", r"less than (1|one) week|<\s*1 week")
+        if i is not None:
+            return _answer("", i, options)
+    # "Desired Pay" / desired salary: the expected CTC
+    if re.search(r"desired (pay|salary|compensation|ctc)|salary expectation", q) and profile.get("expected_ctc_lpa") and not has_opts:
+        return _answer(_fmt(_num(profile["expected_ctc_lpa"])))   # forms add the unit (with_unit) where the box is free text
+    # "Which IIT did you graduate from?": none - NSUT
+    if re.search(r"which (iit|nit|iiit)\b", q) and not has_opts:
+        return _answer("I'm not from an IIT; I did my B.Tech in Information Technology at NSUT, Delhi (2024).")
+    # "Rate your SQL skills on a scale of 1 to 10": 8 for skills on the resume (Ashu's default self-rating)
+    m = re.search(r"rate (your|yourself)( on)?\s*(.+?)\s*(skills?|proficiency|knowledge|expertise)?\s*(on a scale|out of|from|\(1)", q)
+    if m and re.search(r"\b10\b", q):
+        yrs = _skill_years(m.group(3), profile)
+        if yrs:
+            if has_opts:
+                i = _opt(options, r"^\s*8\b"); return _answer("", i, options) if i is not None else None
+            return _answer("8")
+    # BI tools (Tableau, Power BI, Looker): not on the resume -> No
+    if re.search(r"\b(bi tool|tableau|power bi|looker|qlik)\b", q) and re.search(r"knowledge|experience|worked|familiar|proficien", q) \
+            and not any(re.search(r"tableau|power bi|looker|qlik", str(x), re.I) for x in (profile.get("skills_primary") or []) + (profile.get("skills_secondary") or [])):
+        return yn(False)
+    # preferred employment type
+    if re.search(r"(preferred )?employment type|type of employment|job type", q) and not re.search(r"current", q):
+        if has_opts:
+            i = _opt(options, r"full[- ]?time", r"permanent"); return _answer("", i, options) if i is not None else None
+        return _answer("Full-time")
+    # IT background (B.Tech in Information Technology, IT jobs since 2025)
+    if re.search(r"\b(it|tech(nical)?|computer science|cs) background\b", q):
+        return yn(True)
+    # "enrolled in / studied at <university>": only NSUT
+    m = re.search(r"(enrolled|studied|student) (in|at) (.{3,60}?)(\?|$| in the past)", q)
+    if m and re.search(r"universit|college|institut|school|academy", m.group(3)):
+        return yn(bool(re.search(r"netaji|nsut", m.group(3))))
+    # preferred language for communication: English
+    if re.search(r"(preferred|primary) language", q) and not re.search(r"programming|coding", q):
+        if has_opts:
+            i = _opt(options, r"^english\b"); return _answer("", i, options) if i is not None else None
+        return _answer("English")
+    # government employment, now or recently: never (Quess, HeadsUp, ROVA, Verzeo are all private companies)
+    if re.search(r"(employed|worked) (by|for|with|in) (a |the |any )?(government|public sector|state[- ]owned|psu)|government (employee|official|entity)", q) \
+            and re.search(r"are you|were you|have you|recently|currently|past", q):
+        return yn(False)
+    # "Strong expertise in Python programming" / "Strong knowledge to bring up test environments using Docker":
+    # Yes when it names a skill on the resume; anything else goes to the model / Ashu
+    if has_opts and re.match(r"^(strong|good|solid|deep|hands[- ]on|excellent|proven) (expertise|knowledge|experience|understanding|skills?|proficiency)\b", q):
+        known = [s.lower() for s in (profile.get("skills_primary") or []) + (profile.get("skills_secondary") or [])] + \
+                [k.lower() for k in (profile.get("skill_years") or {})]
+        if any(re.search(r"(?<![a-z0-9+#.])" + re.escape(k) + r"(?![a-z0-9+#])", q) for k in known):
+            return yn(True)
+    # travel to a named place for work (Ashu: willing to travel 25-50%)
+    if profile.get("willing_to_travel") and re.search(r"willing to travel|ready to travel|okay to travel|comfortable (with )?travel", q) \
+            and not re.search(r"interview|face to face|f2f|walk", q):
+        return yn(True)
+    return None
+
+
+def _record_form(url: str, question: str) -> None:
+    """External forms a recruiter asks Ashu to fill: listed in output/forms_to_fill.md (deduplicated)."""
+    try:
+        from datetime import datetime
+        from .config import OUTPUT_DIR
+        path = OUTPUT_DIR / "forms_to_fill.md"
+        have = path.read_text() if path.exists() else "# Forms recruiters asked you to fill\n\n"
+        if url not in have:
+            path.write_text(have + f"- [ ] {datetime.now():%d %b %H:%M} {url}  ({' '.join(question.split())[:120]})\n")
+    except Exception:
+        pass
+
+
 def rule_answer(question: str, options: list[str], kind: str, profile: dict) -> QuestionAnswer | None:
+    question_raw = question
     q = " ".join(question.lower().split())
     # Recruiter shorthand and typos seen in the wild: "What is your NP?", "overal year of exp", "YoE".
     q = re.sub(r"\bnp\b", "notice period", q)
     q = re.sub(r"\byoe\b", "years of experience", q)
     q = re.sub(r"\bexp\b\.?", "experience", q)
     q = re.sub(r"\boveral\b", "overall", q)
+    q = re.sub(r"\bcurr+ent\b", "current", q)          # "Currrent CTC" (Crew Kraftorz, 13 Oct 2026)
+    q = re.sub(r"\bnotic\b", "notice", q)
     q = re.sub(r"\bintr?ested\b|\bintersted\b|\binterseted\b", "interested", q)
+    q = re.sub(r"\bface ?(2|two) ?face\b", "face to face", q)   # "Face 2 Face Interview ... at Hyderabad" (12 Oct 2026)
+    q = re.sub(r"\s*\*?\s*\((required|mandatory|optional)\)\s*$", "", q)   # "Notice period* (required)" (iTechnosol, 16 Oct 2026)
     q = q.rstrip(" *:").strip()          # required-field marker: "How many years of Python?\xa0*"
     has_opts = bool(options)
+    hit = _profile_fact(q, options, profile, question_raw)      # questions Ashu answered by hand before (13 Oct 2026 replay)
+    if hit is not None:
+        return hit
 
     # date of birth: from profile.date_of_birth (YYYY-MM-DD), in the DD/MM/YYYY form Indian forms expect
     if re.fullmatch(r"(your )?(date of birth|dob|birth ?date)( \(dd/mm/yyyy\))?", q) and profile.get("date_of_birth") and not has_opts:
@@ -151,6 +432,42 @@ def rule_answer(question: str, options: list[str], kind: str, profile: dict) -> 
             i = _yes_no(options, yes)
             return _answer(options[i], i, options) if i is not None else None
         return _answer("Yes" if yes else "No, I would prefer a virtual interview")
+    # "Are you flexible moving to Bangalore?" / "okay to shift to Pune?" = relocation (Gushwork, 13 Oct 2026)
+    if profile.get("willing_to_relocate") and re.search(r"(flexible|okay|ok|fine|willing|open|comfortable|ready)( with| to)? (moving|move|shift|shifting) to", q):
+        return _answer("", _yes_no(options, True), options) if has_opts else _answer("Yes")
+    # "Which location are you applying for?" (Mindtickle): the first offered city in Ashu's preferred order
+    if has_opts and re.search(r"which (location|city|office)( are you| do you)? (applying|apply|prefer)", q):
+        for city in profile.get("preferred_locations") or []:
+            alias = {"Bengaluru": "bengaluru|bangalore", "Gurugram": "gurugram|gurgaon"}.get(city, re.escape(city.lower()))
+            i = next((k for k, o in enumerate(options) if re.search(alias, o, re.I)), None)
+            if i is not None:
+                return _answer("", i, options)
+    # ownership / high-agency culture checks: Yes (Prodigal, 13 Oct 2026)
+    if re.search(r"(thrive|comfortable|good fit|someone who).{0,40}(high )?(agency|ownership)|high agency", q) and not re.search(r"how|describe|example|tell", q):
+        return _answer("", _yes_no(options, True), options) if has_opts else _answer("Yes")
+    # fixed component of pay: the profile's current CTC (no separate variable confirmed)
+    if re.search(r"fixed (compensation|ctc|salary|pay|component)", q) and not has_opts:
+        v = profile.get("current_ctc_lpa")
+        return _answer(f"{_fmt(float(v))} LPA") if v else None
+
+    # "Which country (and city) are you currently based in?" (BJAK, 13 Oct 2026)
+    if re.search(r"which (country|city)( and (city|country))? (are|do) you (currently )?(based|located|live|living|reside)", q):
+        if has_opts:
+            i = next((k for k, o in enumerate(options) if re.search(r"\bindia\b", o, re.I)), None)
+            if "city" in q:
+                i = next((k for k, o in enumerate(options) if re.search(r"delhi", o, re.I)), i)
+            return _answer("", i, options) if i is not None else None
+        return _answer("India, New Delhi" if "city" in q else "India")
+
+    # current employer / designation (Motorola, 13 Oct 2026: "Please mention name of Current company.")
+    if not has_opts and re.search(r"(name of|mention|your|what is|which is) (the )?(your )?(current|present|latest) (company|employer|organi[sz]ation)\b|^(current|present) (company|employer|organi[sz]ation)( name)?$", q):
+        return _answer(str(profile.get("current_company") or ""))
+    if not has_opts and re.search(r"(current|present) (designation|job title|role)\b", q) and not re.search(r"why|how|year", q):
+        return _answer(str(profile.get("current_title") or ""))
+    # Naukri's "The recruiter requires more information related to your skills" free-text box (TCS, 13 Oct 2026)
+    if not has_opts and re.search(r"more information related to your skills|tell (us|me) about your skills|describe your (key |technical )?skills", q):
+        return _answer("About 2 years building LLM and RAG features in production with Python, FastAPI, LangChain, OpenAI / Azure OpenAI, "
+                       "FAISS, PyTorch, Docker, Redis, PostgreSQL and MongoDB, plus React and Node.js on the full-stack side.")
 
     # middle name: the profile name has none -> "NA" (required text fields reject blanks)
     if re.fullmatch(r"(your )?middle name", q) and not has_opts:
@@ -348,7 +665,11 @@ def rule_answer(question: str, options: list[str], kind: str, profile: dict) -> 
 
     # ---- general experience in years ("How many years of relevant work experience do you have?"): not a skill named "relevant work"
     yes_no_opts = has_opts and all(re.match(r"\s*(yes|no)\b", o, re.I) for o in options)
-    if not yes_no_opts and not re.search(r"\d+\s*[-–to+]", q) and not re.match(r"^(do|does|have|has|are|is) you\b", q) and \
+    # "...work experience do you have with Django?" names a skill: answered by the skill rules below, not total tenure
+    # (Django/PySpark/Azure were answered 2 years this way, 13 Oct 2026)
+    names_skill = re.search(r"experience (?:do you (?:currently )?have |have you )?(?:in|with|on|using)\s+(?!(?:the |this |your |a |an )?"
+                            r"(?:industry|it industry|field|domain|total|overall|years?|yrs?|months?|relevant|software|it|tech(?:nology)?)\b)\w", q)
+    if not names_skill and not yes_no_opts and not re.search(r"\d+\s*[-–to+]", q) and not re.match(r"^(do|does|have|has|are|is) you\b", q) and \
             re.search(r"(how many|no\.? of|number of|total|overall) (years|yrs)? ?(of )?(your )?(relevant|total|overall|professional|work|industry|it)( work| professional| industry)? experience", q) \
             or re.fullmatch(r"(years of |yrs of )?(relevant|total|overall|professional|work)( work)? experience( in years)?\??", q):
         yrs = _num(profile.get("relevant_experience_years" if "relevant" in q else "total_experience_years"))
@@ -407,6 +728,14 @@ def rule_answer(question: str, options: list[str], kind: str, profile: dict) -> 
     if not has_opts and re.fullmatch(r"(personal |portfolio )?(website|portfolio)( url| link)?", q) and (links.get("portfolio") or links.get("github")):
         return _answer(links.get("portfolio") or links.get("github"))
 
+    # ---- US export control: "citizen, national or permanent resident of Iran, Cuba, North Korea or Syria?" (factual)
+    if re.search(r"(citizen|national|resident).{0,60}(iran|cuba|north korea|syria)", q) and profile.get("nationality"):
+        nat = str(profile["nationality"]).lower()
+        hit = bool(re.search(r"iran|cuba|north korea|syria", nat))
+        if has_opts:
+            i = _yes_no(options, hit); return _answer("", i, options) if i is not None else None
+        return _answer("Yes" if hit else "No")
+
     # ---- bankruptcy / financial delinquency / litigation (confirmed none)
     if (profile.get("no_legal_issues") and re.search(r"bankrupt|financial delinquen|litigation|insolven", q)) or \
        (profile.get("no_criminal_record") and re.search(r"criminal|convicted|conviction|offen[cs]e", q)) or \
@@ -419,8 +748,9 @@ def rule_answer(question: str, options: list[str], kind: str, profile: dict) -> 
 
     # ---- "are you based out of <city>?" -> truthful for Delhi/NCR; elsewhere No + relocation note
     # only when the question asks where the CANDIDATE is ("are you based out of X?"), never "this role is based in X, are you ok?"
-    m = re.search(r"(?:are you|do you|you are|currently) (?:currently )?(based|located|living|residing|reside|live) (out of|in|at|near) ([a-z .]+?)(\?|,|$| and | or )", q)
-    if m and not re.search(r"india\b|country", m.group(3)):
+    m = re.search(r"(?:are you|do you|you are|currently) (?:currently )?(based|located|living|residing|reside|live) (out of|in|at|near) ([a-z .]+?)(\?|,|$| and | or )", q) or \
+        re.search(r"^()(?:resident|residence|residential|current) (?:location|city) (in|at)\s*([a-z ./]+?)\s*(\?|,|$)", q)   # "Resident location in Mumbai / Navi Mumbai ?"
+    if m and not re.search(r"india\b|country", m.group(3)) and not (profile.get("willing_to_relocate") and "relocat" in q):
         here = re.search(r"delhi|ncr|noida|gurgaon|gurugram|ghaziabad|faridabad", m.group(3))
         if has_opts:
             i = next((k for k, o in enumerate(options) if re.match(r"\s*(yes|y)\b" if here else r"\s*(no|n)\b", o, re.I)), None)
@@ -471,7 +801,7 @@ def rule_answer(question: str, options: list[str], kind: str, profile: dict) -> 
         return _answer(_fmt(days))      # digits only: free-text notice fields are usually numeric
 
     # ---- CTC / salary, in the unit the question asks for (LPA by default; rupees / monthly when stated)
-    if re.search(r"\b(ctc|salary|compensation|package)\b|(annual|salary|pay|ctc) expectations?|expected (pay|annual)", q):
+    if re.search(r"\b(ctc|salary|compensation|package)\b|(annual|salary|pay|ctc) expectations?|expected (pay|annual)|desired (pay|remuneration)|pay expectation", q):
         if re.search(r"expect|desired|desire|salary expectation|looking for", q):
             lpa = _num(profile.get("expected_ctc_lpa"))
         elif "current" in q or "present" in q or "last drawn" in q or "annual" in q:
@@ -489,7 +819,10 @@ def rule_answer(question: str, options: list[str], kind: str, profile: dict) -> 
     if re.search(r"additional months|months of (total )?experience|experience.{0,20}\bmonths\b", q) and "years" not in q.split("months")[0][-15:]:
         total = _num(profile.get("total_experience_years"))
         if total is not None:
-            months = int(round((total - int(total)) * 12))
+            # "additional months" (next to a separate years box) = the remainder; "Total Experience (Months)" = all of it
+            # (VOPA got 0 months, 15 Oct 2026)
+            remainder = bool(re.search(r"additional|\band months\b|years and|remaining|extra", q))
+            months = int(round((total - int(total)) * 12)) if remainder else int(round(total * 12))
             if has_opts:
                 i = next((k for k, o in enumerate(options) if o.strip() == str(months)), None)
                 return _answer("", i, options) if i is not None else None
@@ -531,7 +864,9 @@ def rule_answer(question: str, options: list[str], kind: str, profile: dict) -> 
                                    else "Not yet at that level; I have worked with related tools.")
             if asks_yes_no:
                 return _answer("", _yes_no(options, True if assume else bool(yrs and yrs > 0)), options)
-            if not yrs:      # unknown skill, or one listed with 0 years
+            if yrs is None and not assume:  # no known skill named: leave it to the model / Ashu instead of typing 0 (12 Oct 2026)
+                return None
+            if not yrs:      # a named skill Ashu does not list
                 yrs = float(profile.get("default_skill_years") or 1) if assume else 0.0
             return numeric(yrs)
         if any(k in q for k in total_markers) or re.search(r"experience\??$", q):
@@ -543,6 +878,12 @@ def rule_answer(question: str, options: list[str], kind: str, profile: dict) -> 
         yes = bool(profile.get("willing_to_relocate"))
         if has_opts:
             i = _yes_no(options, yes)
+            if i is None and yes and re.search(r"which|select|choose|locations|cities", q):
+                # "Which of these locations are you willing to relocate to?": all of them (Ashu will relocate anywhere)
+                idx = [k for k, o in enumerate(options) if not re.search(r"^\s*(none|no|not willing|skip)", o, re.I)]
+                if idx:
+                    return QuestionAnswer(answer_text=", ".join(options[k] for k in idx), selected_option_indices=idx,
+                                          reusable=True, skip=False, confidence=0.95)
             return _answer("", i, options) if i is not None else None
         return _answer("Yes" if yes else "No")
     if re.search(r"\b(current|present) (location|city)\b", q) and not re.search(r"sponsor|visa|authori[sz]", q) or "where are you (currently )?(located|based)" in q or q.strip(" ?") in ("location", "current location", "city"):
@@ -577,7 +918,7 @@ def rule_answer(question: str, options: list[str], kind: str, profile: dict) -> 
             i = _yes_no(options, False); return _answer("", i, options) if i is not None else None
         return _answer("No")
     # ---- availability / joining date
-    if re.search(r"available to (start|join)|start date|join(ing)? date|when can you (start|join)|can you (start|join)|(join|start) within|how soon|earliest|days (do you need |to |for )?(to )?join|days to start|time to join", q) or ("immediately" in q and "available" in q):
+    if re.search(r"available to (start|join)|start date|join(ing)? date|when can you (start|join)|can you (start|join)|(join|start) within|how soon|earliest|days (do you need |to |for )?(to )?join|days to start|time to join|availability to (join|start)|joining availability|how (fast|quickly|soon) (would|could|can|will) you (be able to )?(start|join)|immediate join(ing|er)?\b", q) or ("immediately" in q and "available" in q):
         days = _num(profile.get("notice_period_days"))
         # What window is the question asking about? "immediately" means about a week at most;
         # "within 30 days" / "2 weeks" / "1 month" gives the window explicitly.
@@ -628,6 +969,7 @@ def rule_answer(question: str, options: list[str], kind: str, profile: dict) -> 
     # ---- conflict-of-interest declarations (confirmed "No" for all by the candidate; see profile.no_conflicts_of_interest)
     if profile.get("no_conflicts_of_interest") and re.search(
             r"related to anyone|close personal relationship|relative.{0,40}(employee|work)|government (office|agency|official)|"
+            r"(relations|relatives|blood relati\w*|family members?|spouse|friends?).{0,60}(employ|work|position|board|director)|"
             r"any relatives|covered relationships?|senior management|"
             r"oversight over|negotiate.{0,60}contracts|sign commercial|outside employment|outside activit|conflict of interest|"
             r"politically exposed", q):

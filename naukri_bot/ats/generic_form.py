@@ -67,7 +67,12 @@ LEGAL_CLAIM = re.compile(
 CONSENT_OK = re.compile(
     r"privacy|terms (of (use|service)|and conditions|& conditions)|\bterms\b|data (processing|protection|retention|privacy)|"
     r"process(ing|es|ed)? (of )?(my |your )?(personal )?(data|information)|personal (data|information)|retain|retention|cookie|gdpr|"
-    r"storage and handling|store (and|&) (handle|process)|storage of (my |your )?(data|information)", re.I)
+    r"storage and handling|store (and|&) (handle|process)|storage of (my |your )?(data|information)|"
+    r"(point of |cross[- ]border )?data transfer|transfer of (my |your )?(personal )?(data|information)|"   # Lynx (13 Oct 2026)
+    # "how my information will be processed / used" (Visa Workday, 14 Oct 2026)
+    r"how (my|your) (personal )?(data|information) (will be|is|are) (processed|used|handled|stored|collected)|"
+    # "consent to X collecting, storing, and processing my responses to the demographic data surveys" (Backbase, 15 Oct 2026)
+    r"consent to .{0,40}(collect|stor|process)\w*.{0,60}(responses|answers|survey|demographic)", re.I)
 # acknowledgement-style wording (a statement to tick/confirm rather than a fact to fill in)
 ACK_WORDING = re.compile(
     r"\bi (agree|consent|acknowledge|confirm|accept|am allowing|allow|authori[sz]e|certify|declare|understand|attest)\b|please confirm|"
@@ -80,6 +85,8 @@ WORK_AUTH_Q = re.compile(
 CANDIDATE_COUNTRY_Q = re.compile(r"countr(y|ies).{0,40}(right to work|authori[sz]ed|residence|reside)|source of your right to work|"
                                  r"basis of your (right|authori[sz]ation)", re.I)
 # 10th / 12th (school-level) education fields: never the university's CGPA, year or name
+# "How did you hear about us" in all its wordings ("Where did you hear about us", Detect Technologies 15 Oct 2026)
+HEARD_Q = re.compile(r"(how|where) (did|have) you (first )?(hear|learn|find|come across|get to know)|how you heard|^\s*source\b|referral source", re.I)
 SCHOOL_LEVEL = re.compile(r"10th|12th|\bclass (x|xii|10|12)\b|\bx(ii)?(th)? (std|standard)\b|high school|(?<!post-)(?<!post )secondary|\bssc\b|\bhsc\b|matric", re.I)
 _TWELFTH = re.compile(r"12th|\bclass (xii|12)\b|\bxii\b|\bhsc\b|higher secondary|senior secondary|intermediate", re.I)
 _TENTH = re.compile(r"10th|\bclass (x|10)\b|\bssc\b|secondary school certificate|matric", re.I)
@@ -268,11 +275,17 @@ class GenericFormApplier:
         also = [n for k, n in (("typescript", "TypeScript"), ("javascript", "JavaScript")) if k in sy]
         return f"Python (about {_num(yrs)} years in production)" + (f", also {'/'.join(also)}" if also else "")
 
-    def _ctc_text(self, which: str) -> str | None:
+    def _ctc_text(self, which: str, label: str = "") -> str | None:
         p = self.profile
         v = p.get(f"{which}_ctc_lpa")
         if v in (None, ""):
             return None
+        # unit named in the label: rupees -> whole number (7.5 LPA -> 750000), lakhs -> the bare number (7.5).
+        # Number-only boxes strip "INR 7.5 LPA" to "75", so never send words there (Veersa, 12 Oct 2026).
+        if re.search(r"\(inr\)|in inr|\binr\b|in rupees|\brs\.?\b|₹|per annum in|\(in numbers\)", label, re.I) and not re.search(r"lakh|lac|lpa", label, re.I):
+            return str(int(round(float(v) * 100000)))
+        if re.search(r"lakh|lac|lpa", label, re.I):
+            return _num(v)
         neg = " (negotiable)" if which == "expected" and p.get("ctc_negotiable") else ""
         return f"INR {_num(v)} LPA{neg}"
 
@@ -280,7 +293,9 @@ class GenericFormApplier:
         """10th / 12th fields: (handled, value). Only their percentage is known (marks_10th/12th_percent)."""
         if not SCHOOL_LEVEL.search(l):
             return False, None
-        if re.search(r"percent|%|marks|aggregate", l) and not re.search(r"cgpa|\bgpa\b|year|board|school name|institut", l):
+        # "SSC Percentage / CGPA" accepts a percentage: only a GPA-only label is left alone (15 Oct 2026)
+        if re.search(r"percent|%|marks|aggregate", l) and not re.search(r"year|board|school name|institut", l) \
+                and (re.search(r"percent|%", l) or not re.search(r"cgpa|\bgpa\b", l)):
             key = "marks_12th_percent" if _TWELFTH.search(l) else "marks_10th_percent" if _TENTH.search(l) else None
             v = self.profile.get(key) if key else None
             return True, (_num(v) if v not in (None, "") else None)
@@ -309,9 +324,11 @@ class GenericFormApplier:
             val = self._work_auth_value(l)
             return (val, "rules") if val is not None else (None, "")
         table = [
-            (r"\bfirst name|given name", p.get("first_name")), (r"\blast name|surname|family name", p.get("last_name")),
+            (r"\bfirst name|given name|^first\s*\*?$", p.get("first_name")), (r"\blast name|surname|family name|^last\s*\*?$", p.get("last_name")),
+            (r"^(state|state ?/ ?province|province)\s*\*?$", p.get("state")),   # Ecom Solutions: "First", "Last", "State *" (13 Oct 2026)
             (r"full name|^name\b(?! of)|your name|candidate name|^name\*?$", p.get("name")),
             (r"e-?mail", p.get("email")), (r"phone|mobile|contact (no|number)|whatsapp", p.get("phone_national")),
+            (r"resume (link|url)|cv (link|url)|link to (your )?(resume|cv)", links.get("resume")),   # a shared Drive link, when set
             (r"linkedin", links.get("linkedin")), (r"github", links.get("github")),
             (r"portfolio|website|personal (site|url)", links.get("portfolio") or links.get("github")),
             (r"\bcity\b|current location|location", p.get("location")), (r"postal|pin ?code|zip", p.get("postal_code")),
@@ -340,6 +357,10 @@ class GenericFormApplier:
     def _question_value(self, l: str) -> str | None:
         """Common application-form questions, answered from facts Ashu confirmed (6 Oct 2026)."""
         p = self.profile
+        # post-graduation / master's fields: Ashu has no PG degree - never the B.Tech CGPA (VOPA got 7.22, 15 Oct 2026)
+        if re.search(r"post[- ]?grad|\bpg\b|\bmasters?\b|m\.?\s?tech|\bmba\b|\bm\.?sc\b|\bmca\b", l) and \
+                re.search(r"percent|cgpa|gpa|grade|marks|year|college|universit|institut|degree|specializ", l):
+            return "NA"
         handled, val = self._school_level(l)
         if handled:
             return val
@@ -349,6 +370,8 @@ class GenericFormApplier:
             return self._work_auth_value(l)
         table = [
             (r"preferred (first )?name", p.get("first_name")),
+            # "Job Applied for" / "Position Applying For" as a text box (Clavrit, Skillridge 15 Oct 2026): the posting's title
+            (r"(job|position|role|post) (applied|applying) for|applying for (the )?(position|role|job|post)\b", self.role or None),
             (r"^location( \(city\))?\b|^city\b|current city", p.get("city")),
             (r"enrolled in .{0,30}university in the past", "No"),
             (r"^school\b|school name|university", self._school_short()),
@@ -388,8 +411,8 @@ class GenericFormApplier:
             (r"enrolled in .{0,30}university in the past", "No"),
             (r"where are you currently (located|based)|current(ly)? located", f"{p['location']}, India" if p.get("location") else None),
             (r"home (zip|postal|pin)", str(p.get("postal_code") or "") or None),
-            (r"desired (annual )?compensation|expected (annual )?compensation|compensation expectation", self._ctc_text("expected")),
-            (r"current (total )?(annual )?compensation|current (ctc|salary)", self._ctc_text("current")),
+            (r"desired (annual )?compensation|expected (annual )?compensation|compensation expectation", self._ctc_text("expected", l)),
+            (r"current (total )?(annual )?compensation|curr+ent (ctc|salary)", self._ctc_text("current", l)),
             (r"^(job|employment) duration|duration (at|with|in) (your )?(current|latest|last)", p.get("current_job_duration")),
             (r"^designation( name)?\b|current designation", p.get("current_title")),
             (r"previously applied (at|to|with)|applied (to|at|with) .{0,30} (before|in the past)", "No"),
@@ -533,6 +556,8 @@ class GenericFormApplier:
                 label = el.evaluate(LABEL_JS, timeout=5000)
                 if not label:
                     continue
+                if re.search(r"leave (this|it)( field)? (blank|empty)|do not fill|don.t fill|if you are (a )?human", label, re.I):
+                    continue                                  # visible spam trap (Akantik, 15 Oct 2026): filling it flags the form
                 if typ in ("checkbox",):
                     if re.search(r"current(ly)? (role|work|position|employ)|i currently work", label, re.I):
                         if el.is_checked():
@@ -573,7 +598,7 @@ class GenericFormApplier:
                     if val is not None and src == "profile" and cur != val and not re.search(r"cover|message|summary", label, re.I):
                         el.fill(""); el.fill(val); self._note(label, val, "profile (replaced autofill)")
                     continue
-                if val is None and re.search(r"cover letter|why (do you|are you)|about yourself|message|additional information|summary|introduction|intro\b", label, re.I):
+                if val is None and re.search(r"cover letter|why (do you|are you)|about yourself|tell us about you\b|describe yourself|\bbio\b|message|additional information|summary|introduction|intro\b", label, re.I):
                     canned = rule_answer("Why should we hire you?", [], "text", self.profile)
                     val, src = (canned.answer_text, "canned") if canned else (None, "")
                 if val is None:
@@ -705,8 +730,8 @@ class GenericFormApplier:
                 continue
             labels = [b["label"] for b in boxes]
             pick = None
-            if re.search(r"how did you (hear|learn|find)|source", q, re.I):
-                for w in (self.profile.get("how_heard") or []) + ["Job Board", "LinkedIn", "Company Website", "Website", "Other"]:
+            if HEARD_Q.search(q) or re.search(r"source", q, re.I):
+                for w in (self.profile.get("how_heard") or []) + ["Job Board", "LinkedIn", "Company Website", "Website", "Web", "Other"]:
                     pick = next((l for l in labels if w.lower() in l.lower()), None)
                     if pick:
                         break
@@ -738,6 +763,18 @@ class GenericFormApplier:
         if not options:
             return None
         l = label.lower()
+        # college dropdowns: NSUT when listed, else the list's "Other" (Ashu, 6 Oct 2026)
+        if re.search(r"(undergraduate|graduation|bachelor'?s?)? ?(institution|university|college)( name)?\b", l) and not re.search(r"year|gpa|cgpa|percent|degree|major", l):
+            hit = next((o for o in options if re.search(r"netaji|nsut", o, re.I)), None) or \
+                  next((o for o in options if re.search(r"^\s*others?\b", o, re.I)), None)
+            if hit:
+                return hit
+        # a privacy / data-transfer acknowledgement offered as a dropdown ("Point of Data Transfer": Acknowledge/Confirm,
+        # Lynx 13 Oct 2026): same rule as consent checkboxes, only for privacy-type wording, never legal claims
+        if consent_only(label):
+            ack = next((o for o in options if re.search(r"^\s*(i )?(acknowledge|confirm|agree|accept|consent|yes)\b", o, re.I)), None)
+            if ack:
+                return ack
         # US export-control (EAR) citizenship check (Cerebras, chip and defence-adjacent firms): a factual answer from
         # profile.nationality - never "U.S. person" for a non-US national
         if re.search(r"export administration|\bu\.?s\.? person\b|deemed export", l + " " + " ".join(options), re.I):
@@ -747,6 +784,11 @@ class GenericFormApplier:
                 want = (r"not a u\.?s\.? person.{0,40}\bam a\b" if sanctioned else
                         r"not a u\.?s\.? person.{0,40}(not a current|am not a citizen|not a citizen)")
                 hit = next((o for o in options if re.search(want, o, re.I)), None)
+                if hit:
+                    return hit
+        if HEARD_Q.search(label):
+            for w in (self.profile.get("how_heard") or []) + ["Job Board", "LinkedIn", "Company Website", "Website", "Web", "Other"]:
+                hit = next((o for o in options if w.lower() in o.lower()), None)
                 if hit:
                     return hit
         handled, val = self._school_level(l)
@@ -881,7 +923,7 @@ class GenericFormApplier:
                 pick = next((n for n in names if re.search(r"^0 - other|^other$", n, re.I)), None)
         if pick is None and names:
             pick = self._pick(label, names)
-        if pick is None and re.search(r"how did you hear|source", label, re.I):
+        if pick is None and (HEARD_Q.search(label) or re.search(r"source", label, re.I)):
             for w in (self.profile.get("how_heard") or []) + ["Job Board", "LinkedIn", "Other"]:
                 pick = next((n for n in names if w.lower() in n.lower()), None)
                 if pick:
@@ -979,6 +1021,8 @@ class GenericFormApplier:
     def _unknown(self, label, options):
         log.info("    %-45s -> (no answer) options=%s", label[:45], options[:5])
         self.result.filled.append({"label": label, "value": None, "source": "unknown", "options": options})
+        from ..ask_ashu import record
+        record(label, options, "company-form", getattr(self, 'role', ''))
 
     def run(self, url: str) -> FormResult:
         try:
@@ -1063,6 +1107,18 @@ class GenericFormApplier:
             # CAPTCHAs are for a person: fill everything, never solve or bypass it
             self.result.status, self.result.notes = "needs_you", "CAPTCHA on the form: type it and press Submit yourself"
             return self.result
+        # a sales / client enquiry form reached from a careers link ("Tell us about your project", "Project type",
+        # "Estimated budget": Xonier 15 Oct 2026): not a job application - never fill or submit it
+        labels = " | ".join(str(f.get("label") or "") for f in self.result.filled)
+        if re.search(r"tell us about your project|project type|estimated budget|your budget|project budget|"
+                     r"request (a|for) (quote|proposal)|get a (free )?quote", labels, re.I):
+            self.result.status, self.result.notes = "skipped", "not a job application (client enquiry form)"
+            return self.result
+        # "Email this job" / share-with-a-friend widgets on a job page ("Recipient's Email address": Ecolab careers,
+        # 15 Oct 2026): sending one is not an application
+        if re.search(r"recipient'?’?s? e-?mail|friend'?’?s? e-?mail|email this job|share this job|send (this )?job to", labels, re.I):
+            self.result.status, self.result.notes = "no_form", "only an 'email this job' widget found, no application form"
+            return self.result
         missing = [f["label"] for f in self.result.filled if f["source"] == "unknown"]
         if missing:
             self.result.status, self.result.notes = "needs_you", f"no answer for: {missing[:3]}"
@@ -1115,6 +1171,23 @@ class GenericFormApplier:
                 # error element on the page: a visible control still :invalid means nothing was sent
                 errs += self._invalid_fields()
                 still_open = self._find_submit() is not None
+                # fields that appear only after an earlier answer ("Notice period", "Expected salary" after "Work type":
+                # iTechnosol, 16 Oct 2026): fill once more and retry the submit before handing it over
+                if errs and still_open and not getattr(self, "_refilled", False):
+                    self._refilled = True
+                    log.info("    form rejected (%s): filling the new fields and retrying once", "; ".join(errs[:3])[:120])
+                    self.fill(again=True)
+                    if not [f for f in self.result.filled if f["source"] == "unknown"]:
+                        btn2 = self._find_submit()
+                        if btn2:
+                            start_url, before = self.pg.url, self.pg.inner_text("body")
+                            btn2.click()
+                            for _ in range(15):
+                                time.sleep(2)
+                                if confirmation_seen(before, self.pg.inner_text("body"), start_url, self.pg.url, self._form_gone(btn2)):
+                                    self.result.status, self.result.notes = "applied", "submitted (second pass); confirmation shown"
+                                    return self.result
+                    errs = self._invalid_fields() or errs
                 if errs:
                     self.result.status, self.result.notes = "needs_you", "form rejected, NOT submitted: " + "; ".join(errs[:5])
                 elif still_open and self.pg.locator("script[src*='recaptcha'], iframe[src*='recaptcha']").count():

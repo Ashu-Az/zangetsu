@@ -66,6 +66,7 @@ class Portal:
         cards: list[JobCard] = []
         seen_ids: set[str] = set()
         exhausted: set[str] = set()     # searches that already returned an empty page
+        stale: dict[str, int] = {}      # consecutive pages per search with nothing unprocessed
         for url in self.search_urls():
             query = _query_key(url)
             if query in exhausted:
@@ -80,7 +81,13 @@ class Portal:
             new = [c for c in found if c.job_id not in seen_ids]
             seen_ids.update(c.job_id for c in new)
             cards.extend(new)
-            log.info("[%s] %s -> %d cards, %d new", self.name, url[:80], len(found), len(new))
+            unseen = sum(not tracker.is_seen(self._tid(c.job_id)) for c in new)
+            log.info("[%s] %s -> %d cards, %d new, %d not processed before", self.name, url[:80], len(found), len(new), unseen)
+            # deeper pages of a search that keeps returning processed jobs are repeats (Hirist 13 Oct 2026: 965 cards
+            # over 65 pages, 11 unprocessed): stop that search after two such pages in a row
+            stale[query] = 0 if unseen else stale.get(query, 0) + 1
+            if stale[query] >= 2:
+                exhausted.add(query)
             time.sleep(random.uniform(2, 4))
         fresh = [c for c in cards if not tracker.is_seen(self._tid(c.job_id))]
         if self.max_views and len(fresh) > self.max_views:

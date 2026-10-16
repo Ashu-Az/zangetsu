@@ -5,17 +5,20 @@
 cd "$(dirname "$0")/.." || exit 1
 LOG="output/cycles/$(date +%Y%m%d-%H%M).log"; mkdir -p output/cycles
 PY=.venv/bin/python
+# answer unknown questions with a model when a key is in .env (Groq or Anthropic); otherwise rules + Ashu only
+NOLLM=--no-llm; grep -qE "^(GROQ|ANTHROPIC)_API_KEY=.+" .env && NOLLM=
 {
   echo "=== cycle $(date)"
   # 1. keep the Naukri profile "updated today" (re-saves the headline; skips if refreshed in the last 3 h)
   $PY -m naukri_bot refresh
   if [ "${1:-}" = "morning" ]; then $PY -m naukri_bot profile itskills; fi
-  # 2. recruiter invitations first: the strongest leads (same filters, quota and cooldown as search)
+  # 2. Naukri Neo (Pro AI agent) suggestions first: Ashu's top priority (13 Oct 2026); then recruiter invitations
+  $PY tools/neo_apply.py
   $PY -m naukri_bot nvites --max 10
   # Naukri Pro early-access roles (hidden, pre-posting): share interest in the ones that pass the filters
   $PY -m naukri_bot early-access --max 30
   # 3. Naukri search and Hirist use separate browser profiles, so they run side by side
-  $PY -m naukri_bot run --source all --max 30 --only naukri --no-llm --assist --max-applicants 100000 &
+  $PY -m naukri_bot run --source all --max 30 --only naukri $NOLLM --assist --max-applicants 100000 &
   $PY -m naukri_bot portal hirist --max 15 &
   wait
   # 3b. recruiter emails with a tailored resume (sends only with GMAIL_APP_PASSWORD set, else writes drafts)

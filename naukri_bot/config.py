@@ -43,6 +43,8 @@ class Settings:
     # cap for one-click Naukri jobs; 0 = no cap (they reach 100+ within hours of posting)
     max_applicants_direct: int = field(default_factory=lambda: _env_int("MAX_APPLICANTS_DIRECT", 0))
     daily_quota: int = field(default_factory=lambda: _env_int("DAILY_QUOTA", 50))
+    # applications search runs leave unused for Neo suggestions and recruiter NVites (Ashu's priority, 13 Oct 2026)
+    priority_reserve: int = field(default_factory=lambda: _env_int("PRIORITY_RESERVE", 8))
     applicant_tiers: list[int] = field(default_factory=lambda: [int(x) for x in _env_list("APPLICANT_TIERS")] or [50, 100])
     survey_cache_hours: int = field(default_factory=lambda: _env_int("SURVEY_CACHE_HOURS", 6))
     max_job_age_days: int = field(default_factory=lambda: _env_int("MAX_JOB_AGE_DAYS", 1))

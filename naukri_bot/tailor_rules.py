@@ -91,9 +91,27 @@ def apply_plan(r, plan: dict, data: dict, corpus: FactCorpus) -> list[Ungrounded
     if plan.get("projects"):
         r.projects = [ProjectItem(**projects[k]) for k in plan["projects"] if k in projects]
     kws = [k.lower() for k in plan.get("keywords", [])]
-    for e in r.experience:                                   # most JD-relevant bullet first, wording unchanged
+    dropped: list[Ungrounded] = []
+    # optional "experience": {"<company substring>": ["bullet in the JD's words", ...]} - the same real work, re-worded
+    # for this job (Ashu, 13 Oct 2026). Each bullet must pass the grounding check (no new tool, practice or metric);
+    # ungrounded bullets are dropped, and if none survive the role keeps its original bullets.
+    from .grounding import check_text
+    for key, bullets in (plan.get("experience") or {}).items():
+        for e in r.experience:
+            if key.lower() in e.company.lower():
+                good = []
+                for b in bullets:
+                    bad = check_text(b, f"experience:{e.company}", corpus)
+                    if bad:
+                        dropped += bad
+                        log.warning("re-worded bullet dropped (%s): %s", ", ".join(u.item for u in bad), b[:90])
+                    else:
+                        good.append(b)
+                if good:
+                    e.bullets = good
+    for e in r.experience:                                   # most JD-relevant bullet first
         e.bullets = sorted(e.bullets, key=lambda b: -sum(k in b.lower() for k in kws))
-    return enforce(r, corpus, base_headline, base_summary)
+    return dropped + enforce(r, corpus, base_headline, base_summary)
 
 
 def url_hash(url: str) -> str:

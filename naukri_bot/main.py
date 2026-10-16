@@ -46,7 +46,7 @@ def llm_available() -> bool:
     """Credentials the Anthropic SDK can use: an API key / auth token, or an `ant auth login` profile."""
     import os
     from pathlib import Path
-    if os.getenv("ANTHROPIC_API_KEY", "").strip() or os.getenv("ANTHROPIC_AUTH_TOKEN", "").strip():
+    if os.getenv("ANTHROPIC_API_KEY", "").strip() or os.getenv("ANTHROPIC_AUTH_TOKEN", "").strip() or os.getenv("GROQ_API_KEY", "").strip():
         return True
     return (Path.home() / ".config" / "anthropic").is_dir()
 
@@ -310,13 +310,15 @@ def cmd_run(settings: Settings, args) -> int:
     max_apps = args.max if args.max is not None else settings.max_applications
     from .cooldown import paused_until
     until = paused_until("naukri")
-    if until and not args.dry_run:
+    # company-site jobs only click "Apply on company site" (no Naukri apply API, no quota), so they run during a pause
+    if until and not args.dry_run and args.only != "company":
         log.error("Naukri cooldown until %s; not applying.", until)
         return 0
     done_today = Tracker().applied_last_24h()     # Naukri's cap is a rolling 24 h window
-    remaining = max(settings.daily_quota - done_today, 0)
+    remaining = max(settings.daily_quota - settings.priority_reserve - done_today, 0)
     if remaining < max_apps:
-        log.info("Daily quota %d, applied in the last 24 h %d -> this run may apply to %d more.", settings.daily_quota, done_today, remaining)
+        log.info("Daily quota %d (%d kept for Neo/NVites), applied in the last 24 h %d -> this run may apply to %d more.",
+                 settings.daily_quota, settings.priority_reserve, done_today, remaining)
         max_apps = remaining
     profile = load_profile()
     if profile_is_example() and not (args.dry_run or args.survey_only):
@@ -545,7 +547,7 @@ def cmd_workday_run(settings: Settings, args) -> int:
             pdf, rep = tailored_pdf(j.jd, j.title, j.company, playwright=b.pw, url=j.url)
             log.info("  resume: %s (JD skills matched: %s)", pdf.name, ", ".join(rep["matched_skills"][:8]) or "-")
             job = JobPosting(job_id=j.req_id or j.url, url=j.url, title=j.title, company=j.company, location=j.location)
-            w = WorkdayApplier(b.page, profile, email, password, str(pdf), assist=not args.submit, submit=args.submit)
+            w = WorkdayApplier(b.page, profile, email, password, str(pdf), assist=not args.submit, submit=args.submit, jd=j.jd, job_location=j.location)
             try:
                 res = w.run(j.url)
             except Exception as e:                 # one site's surprise must not stop the batch
@@ -615,11 +617,15 @@ def cmd_company_apply(settings: Settings, args) -> int:
     Settings.browser_profile_dir = property(lambda self, d=args.browser_profile: STATE_DIR / d)
     with Browser(settings) as b:
         first = True
+        left_for_person = 0       # tabs kept open for Ashu (needs_you / CAPTCHA / ready to submit)
+        last_left = False
         for url, role, jd_url in entries:
             if url in applied_urls:                    # the same URL twice in one file
                 log.info("skip (already attempted this run): %s", url[:100]); continue
             applied_urls.add(url)
-            if args.hold and not first:
+            # never reuse a tab that was left for the person: they may be typing in it (Ashu lost a form he was
+            # filling when the next job loaded in the same tab, 16 Oct 2026)
+            if not first and (args.hold or last_left):
                 b.page = b.context.new_page()          # each form stays open in its own tab
             first = False
             log.info("=" * 60)
@@ -658,6 +664,10 @@ def cmd_company_apply(settings: Settings, args) -> int:
                 continue
             b.save_debug(f"company-{company}-{res.status}")
             log.info("  -> %s: %s", res.status, res.notes)
+            last_left = res.status in ("needs_you", "ready_to_submit") or "CAPTCHA" in (res.notes or "")
+            if last_left:
+                left_for_person += 1
+                log.info("  (this tab stays open for you; the next form opens in a new tab)")
             job = JobPosting(job_id=url, url=url, title=title, company=company)
             tracker.record_application(job, "company_site", res.status, notes=res.notes[:200], resume_pdf=str(pdf), remember=False)
             if args.hold:
@@ -672,8 +682,9 @@ def cmd_company_apply(settings: Settings, args) -> int:
                 except Exception:
                     pass
                 b.page.wait_for_timeout(300000)
-        if args.hold:
-            log.info("All forms are open in tabs. Check each, type any CAPTCHA, press Submit; close the window when done.")
+        if args.hold or left_for_person:
+            log.info("%d form(s) are open in tabs for you. Finish each, press Submit; close the window when done.",
+                     left_for_person if not args.hold else len(entries))
             try:
                 b.context.wait_for_event("close", timeout=0)
             except Exception:
@@ -905,7 +916,8 @@ def cmd_outreach(settings: Settings, args) -> int:
     with sync_playwright() as pw:
         results = outreach.run(settings, load_profile(), send=args.send, max_n=args.max, sources=sources, playwright=pw)
     sent = sum(r["status"] == "emailed" for r in results)
-    log.info("outreach: %d emailed, %d drafted -> %s", sent, len(results) - sent, outreach.OUT_DIR)
+    drafted = sum(r["status"] == "drafted" for r in results)
+    log.info("outreach: %d emailed, %d drafted, %d skipped -> %s", sent, drafted, len(results) - sent - drafted, outreach.OUT_DIR)
     return 0
 
 

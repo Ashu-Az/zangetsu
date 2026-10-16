@@ -25,3 +25,6 @@ profile/resume_variants.yaml
 
 # Run inputs: job/company URL lists and one-off scripts (may hold personal paths)
 inputs/
+profile/confirmed_facts.md
+profile/*.bak*
+profile/*.yaml.bak*
