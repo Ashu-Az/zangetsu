@@ -198,7 +198,10 @@ def neo_apply_one(b: Browser, llm, cache, tracker, job) -> str:
     used = btn.inner_text().strip()
     btn.click()
     log.info("  clicked %r", used)
-    step, answered = "resume", None
+    # "Apply now" has no resume step: Neo goes straight to the recruiter's questions
+    # (16 Oct 2026: Infosys/Indium failed after 4 min waiting for resume buttons
+    # while "Add missing details" was on screen)
+    step, answered = ("resume" if used == "Apply with custom Resume" else "questions"), None
     deadline = time.time() + 240
     while time.time() < deadline:
         time.sleep(3)
@@ -211,6 +214,9 @@ def neo_apply_one(b: Browser, llm, cache, tracker, job) -> str:
         if step == "resume":
             # the resume step is over when THIS job's "Use original Resume" appears (with "Apply with tailored
             # Resume" next to it when tailoring worked); take the tailored one when offered
+            if new_button(pg, "Add missing details", baseline) is not None:
+                step = "questions"   # Neo skipped tailoring and went straight to questions
+                continue
             if new_button(pg, "Use original Resume", baseline) is None and new_button(pg, "Apply with tailored Resume", baseline) is None:
                 continue
             time.sleep(2)
