@@ -178,3 +178,12 @@ def test_middle_name_defaults_to_na():
     from naukri_bot.rules import rule_answer
     assert rule_answer("Middle Name", [], "text", {}).answer_text == "NA"
     assert rule_answer("Middle Name *", [], "text", {"middle_name": "Kumar"}).answer_text == "Kumar"
+
+
+def test_in_person_interview_from_profile():
+    from naukri_bot.rules import rule_answer
+    p = {"in_person_interview": False}
+    assert rule_answer("Are you available for Face to face Interview?", [], "text", p).answer_text.startswith("No")
+    a = rule_answer("Are you available for in person interview on 13-Oct-26?", ["Yes", "No"], "radio", p)
+    assert a.selected_option_indices == [1]
+    assert rule_answer("Are you available for Face to face Interview?", [], "text", {}) is None

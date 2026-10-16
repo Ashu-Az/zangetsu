@@ -143,6 +143,15 @@ def rule_answer(question: str, options: list[str], kind: str, profile: dict) -> 
         y, m, d = str(profile["date_of_birth"]).split("-")
         return _answer(f"{d}/{m}/{y}")
 
+    # face-to-face / in-person / walk-in interview availability: profile.in_person_interview
+    if re.search(r"face[- ]to[- ]face|in[- ]person (interview|round|discussion)|\bf2f\b|walk[- ]?in (interview|drive)|onsite interview", q) \
+            and "in_person_interview" in profile:
+        yes = bool(profile["in_person_interview"])
+        if has_opts:
+            i = _yes_no(options, yes)
+            return _answer(options[i], i, options) if i is not None else None
+        return _answer("Yes" if yes else "No, I would prefer a virtual interview")
+
     # middle name: the profile name has none -> "NA" (required text fields reject blanks)
     if re.fullmatch(r"(your )?middle name", q) and not has_opts:
         return _answer(str(profile.get("middle_name") or "NA"))
