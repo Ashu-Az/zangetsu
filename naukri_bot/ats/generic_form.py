@@ -31,6 +31,14 @@ LABEL_JS = r"""e => {
   const lb = e.getAttribute('aria-labelledby');
   if (lb) { const t = lb.split(' ').map(i => (document.getElementById(i) || {}).innerText || '').join(' '); if (ok(t)) return clean(t); }
   const wrap = e.closest('label'); if (wrap && ok(wrap.innerText)) return clean(wrap.innerText);
+  // sentence forms: "My name is [__] ... contact me at [email] [phone]" (Grids and Guides, 18 Oct 2026)
+  // fields sitting inline in running text, with no label of their own
+  const inline = e.parentElement && /^(P|SPAN|DIV)$/.test(e.parentElement.tagName) && e.parentElement.childNodes.length > 2
+    && [...e.parentElement.childNodes].some(n => n.nodeType === 3 && /[A-Za-z]{3}/.test(n.textContent));
+  if (inline && e.type === 'email') return 'Email';
+  if (inline && e.type === 'tel') return 'Phone';
+  const pt = e.previousSibling && e.previousSibling.nodeType === 3 ? e.previousSibling.textContent.trim() : '';
+  if (/(my name is|i am|name:?)$/i.test(pt)) return 'Full Name';
   // climb: the nearest ancestor that holds a label-like element with real words (Zoho puts it ~6 levels up).
   // Within that ancestor take the label just BEFORE the field: on multi-field rows (PyjamaHR) the first label in
   // a wide ancestor belongs to another field ("Contact Number" for First Name). Past two levels a descriptive
@@ -46,7 +54,9 @@ LABEL_JS = r"""e => {
   let p = e.parentElement;
   for (let i = 0; i < 8 && p; i++, p = p.parentElement) {
     if (i === 2 && ok(ph) && !/^(select|search|type|enter here)/i.test(ph)) return clean(ph);
-    const cands = [...p.querySelectorAll('label, legend, [class*=label], [class*=Label]')].filter(l => !l.contains(e) && ok(l.innerText));
+    // a <label> wrapping another control (a consent checkbox) is that control's label, never this field's (Grids and Guides)
+    const cands = [...p.querySelectorAll('label, legend, [class*=label], [class*=Label]')].filter(l => !l.contains(e) && ok(l.innerText)
+      && !(l.tagName === 'LABEL' && l.querySelector('input, select, textarea')));
     if (!cands.length) continue;
     const prev = cands.filter(l => before(l) && !owned(l, p));
     if (prev.length && prev[prev.length - 1].innerText.trim().length > 3) return clean(prev[prev.length - 1].innerText);
