@@ -468,7 +468,11 @@ class GenericFormApplier:
             pg.goto(href if href.startswith("http") else base + href, wait_until="domcontentloaded"); time.sleep(4)
             if has_form():
                 return True
-        for pat in (r"^\s*apply( now| for this job)?\s*!?\s*$", r"i.?m interested", r"apply"):
+        # wizard-style pages (Career Passport "Let's go", Workwise) hide the form behind a start button
+        for pat in (r"^\s*apply( now| for this job)?\s*!?\s*$", r"i.?m interested",
+                    r"^\s*let'?s go\s*→?\s*$", r"^\s*get started\s*→?\s*$",
+                    r"^\s*start( (my|your|the))?( application)?\s*→?\s*$",
+                    r"^\s*begin( application)?\s*$", r"apply"):
             for el in pg.locator("a, button").all():
                 try:
                     if el.is_visible() and re.search(pat, el.inner_text().strip(), re.I):
