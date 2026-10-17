@@ -511,6 +511,16 @@ def rule_answer(question: str, options: list[str], kind: str, profile: dict) -> 
         if i is not None:
             return _answer(options[i], i, options)
 
+    # confirmed yes/no facts (Ashu, 18 Oct 2026): AWS in production; owned a feature/system end to end
+    if has_opts and re.search(r"\baws\b.{0,30}\bproduction\b|production.{0,30}\baws\b", q) and "aws_production" in profile:
+        i = _yes_no(options, bool(profile["aws_production"]))
+        if i is not None:
+            return _answer(options[i], i, options)
+    if has_opts and re.search(r"owned (a |an )?(feature|system|product|project|module|service)s?( ?/ ?\w+)? end[- ]to[- ]end", q) and "owned_end_to_end" in profile:
+        i = _yes_no(options, bool(profile["owned_end_to_end"]))
+        if i is not None:
+            return _answer(options[i], i, options)
+
     # personal social media (Facebook/Instagram/X/Twitter/Snapchat): not shared on job applications; LinkedIn/GitHub are
     if re.search(r"(share|provide|link to) your (facebook|instagram|twitter|x|snapchat|tiktok)\b|(facebook|instagram|twitter|snapchat|tiktok) (profile|account|handle|id)", q):
         if has_opts:
