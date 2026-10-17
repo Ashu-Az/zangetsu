@@ -14,14 +14,14 @@ gap() { s=$(( 10 + RANDOM % 11 )); echo "--- next step in ${s}s $(date +%H:%M)";
   echo "=== hunt $(date)"
   if [ "${1:-}" != "company" ]; then
   if [ "${1:-}" != "search" ]; then
-    $PY -m naukri_bot run --source recommended --only naukri --max 25 --assist
+    $PY -m naukri_bot run --source recommended --only naukri --max 25 --assist --max-applicants 100000
     gap
     $PY -m naukri_bot refresh
     $PY -m naukri_bot nvites --max 10
     $PY -m naukri_bot early-access --max 30
     gap
   fi
-  $PY -m naukri_bot run --source search --only naukri --max 25 --assist
+  $PY -m naukri_bot run --source search --only naukri --max 25 --assist --max-applicants 100000
   gap
   $PY -m naukri_bot portal hirist --max 15
   gap
