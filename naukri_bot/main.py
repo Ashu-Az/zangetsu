@@ -421,8 +421,9 @@ def cmd_run(settings: Settings, args) -> int:
                             log.warning("3 Naukri applies in a row were not confirmed; stopping and pausing Naukri 6 h.")
                             break
                     except QuotaReached:
-                        log.warning("Naukri daily application quota reached; stopping.")
-                        break
+                        # no more Naukri applies today, but company-site jobs later in the list still go ahead
+                        log.warning("Naukri daily application quota reached; no more Naukri applies this run.")
+                        max_apps = stats["applied"]
                     except Exception as e:
                         log.exception("  apply failed: %s", e)
                         tracker.record_application(job, mode.value, "failed", notes=str(e)[:200])
