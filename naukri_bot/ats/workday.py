@@ -855,7 +855,15 @@ class WorkdayApplier:
                         checks.first.check(force=True); self._note(label, "checked", "profile")
                 elif checks.count() == 1 and re.search(r"i (agree|acknowledge|consent|confirm|have read|have reviewed|understand|certify|declare|attest)|terms|privacy (policy|notice|statement)|confirm the statement|check this box to (confirm|agree|acknowledge)", label, re.I):
                     if not checks.first.is_checked():
-                        if consent_only(label):              # privacy / terms / data processing only
+                        # "Yes, I have read and consent to the above" names nothing itself: the "above" is the
+                        # section's heading (Citi: "Terms and Conditions / Terms of Use"); only a terms or privacy
+                        # section counts, and the label must still not be a legal claim
+                        above = ""
+                        if re.search(r"(consent|agree) to the above|read and (consent|agree)", label, re.I) and not LEGAL_CLAIM.search(label):
+                            body = self.pg.inner_text("body")
+                            k = body.find(label[:40])
+                            above = body[max(0, k - 4000):k] if k > 0 else ""
+                        if consent_only(label) or re.search(r"terms and conditions|terms of use|privacy (policy|notice|statement)", above[-4000:], re.I):
                             checks.first.check(force=True)
                             self._note(label, "checked", "consent")
                         else:                                # may be a legal claim (LEGAL_CLAIM): the person decides
