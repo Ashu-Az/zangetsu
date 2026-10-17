@@ -37,7 +37,9 @@ LABEL_JS = r"""e => {
     && [...e.parentElement.childNodes].some(n => n.nodeType === 3 && /[A-Za-z]{3}/.test(n.textContent));
   if (inline && e.type === 'email') return 'Email';
   if (inline && e.type === 'tel') return 'Phone';
-  const pt = e.previousSibling && e.previousSibling.nodeType === 3 ? e.previousSibling.textContent.trim() : '';
+  let pn = e.previousSibling;                      // React leaves comment / empty text nodes in between
+  while (pn && (pn.nodeType === 8 || (pn.nodeType === 3 && !pn.textContent.trim()))) pn = pn.previousSibling;
+  const pt = pn && pn.nodeType === 3 ? pn.textContent.trim() : '';
   if (/(my name is|i am|name:?)$/i.test(pt)) return 'Full Name';
   // climb: the nearest ancestor that holds a label-like element with real words (Zoho puts it ~6 levels up).
   // Within that ancestor take the label just BEFORE the field: on multi-field rows (PyjamaHR) the first label in
