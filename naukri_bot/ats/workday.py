@@ -99,6 +99,9 @@ class WorkdayApplier:
         confirmed fact; otherwise it stays for the person to check."""
         if not WORK_AUTH_Q.search(label):
             return default
+        if not self.job_location:   # Workday URLs carry the location: /job/Gurugram-Haryana-India/<title>_<id>
+            m = re.search(r"/job/([^/]+)/[^/]+$", getattr(self.pg, "url", "") or "")
+            self.job_location = m.group(1).replace("-", " ") if m else ""
         if re.search(r"\bindia\b|\bIND\b|bengaluru|bangalore|hyderabad|pune|chennai|mumbai|gurugram|gurgaon|noida|delhi|kolkata|ahmedabad",
                      self.job_location or "", re.I) and not re.search(r"remote\s*-?\s*(us|usa|uk|eu)|united states|singapore|dubai", self.job_location or "", re.I):
             return default
@@ -1043,8 +1046,10 @@ class WorkdayApplier:
         if edus:
             self._ensure_panels("Education", len(edus))
             for i, ed in enumerate(edus):
-              try:
+              for attempt in (1, 2):   # Citi 17 Oct 2026: the first click timed out while the panel was still settling
+               try:
                 panel = self._panels("Education").nth(i)
+                panel.scroll_into_view_if_needed(timeout=5000)
                 school = ed["institution"].split(",")[0].strip()
                 if panel.locator(f"{A('formField-schoolName')} input").count():
                     self._set_text(panel, "formField-schoolName", school)
@@ -1096,9 +1101,12 @@ class WorkdayApplier:
                     self._set_date(panel.locator(A("formField-firstYearAttended")), (1, years[0]))
                     self._set_date(panel.locator(A("formField-lastYearAttended")), (1, years[-1]))
                 self._note(f"Education {i + 1}", f"{ed['degree']} @ {ed['institution']}", "resume")
-              except Exception as e:
-                log.warning("    education %d not filled: %s", i + 1, str(e)[:120])
-                self._unknown(f"Education {i + 1}", [])
+                break
+               except Exception as e:
+                log.warning("    education %d not filled (attempt %d): %s", i + 1, attempt, str(e)[:120])
+                pg.keyboard.press("Escape"); time.sleep(2)
+                if attempt == 2:
+                    self._unknown(f"Education {i + 1}", [])
 
     def _fill_websites(self) -> None:
         """Websites: portfolio, GitHub, LinkedIn."""
