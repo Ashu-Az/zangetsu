@@ -965,6 +965,13 @@ class WorkdayApplier:
         """Searchable school list: type each search in turn and take an option that is exactly the school (full
         name or alias); "Other"/"Not Listed" only as a last resort, and then the person reviews it."""
         inp = field.locator("input").first
+        # already chosen (resume autofill, or an earlier pass): keep it when it is the school (Citi 17 Oct 2026: the
+        # chip read "Netaji Subhas Institute of Technology" and the bot kept searching past it)
+        chips = [c.inner_text().strip() for c in field.locator(A("selectedItem")).all()]
+        hit = next((c for c in chips if self.school_option_matches(c, institution)), None)
+        if hit:
+            self._note("School or University", hit, "resume")
+            return True
         for q in searches:
             fallback = re.fullmatch(r"others?|not listed|school not listed|not in list|other university|other institution|unlisted", q.strip(), re.I)
             try:
