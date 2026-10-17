@@ -418,6 +418,8 @@ def rule_answer(question: str, options: list[str], kind: str, profile: dict) -> 
     q = re.sub(r"\boveral\b", "overall", q)
     q = re.sub(r"\bcurr+ent\b", "current", q)          # "Currrent CTC" (Crew Kraftorz, 13 Oct 2026)
     q = re.sub(r"\bnotic\b", "notice", q)
+    q = re.sub(r"\bqualif[a-z]*tion\b", "qualification", q)   # "Qualifaction" (Webingo, 17 Oct 2026)
+    q = re.sub(r"\bexp[er]{1,3}i?ence\b", "experience", q)    # "Exprience"
     q = re.sub(r"\bintr?ested\b|\bintersted\b|\binterseted\b", "interested", q)
     q = re.sub(r"\bface ?(2|two) ?face\b", "face to face", q)   # "Face 2 Face Interview ... at Hyderabad" (12 Oct 2026)
     q = re.sub(r"\s*\*?\s*\((required|mandatory|optional)\)\s*$", "", q)   # "Notice period* (required)" (iTechnosol, 16 Oct 2026)

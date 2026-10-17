@@ -338,7 +338,7 @@ class GenericFormApplier:
             (r"\bcity\b|current location|location", p.get("location")), (r"postal|pin ?code|zip", p.get("postal_code")),
             (r"address", p.get("address_line1")), (r"current (company|employer|organi[sz]ation)", p.get("current_company")),
             (r"current (title|designation|role|position)", p.get("current_title")),
-            (r"^degree\b|degree name|qualification", p.get("degree")),
+            (r"^degree\b|degree name|qualif[a-z]*tion", p.get("degree")),
             (r"institut|school|university|college", p.get("school")),
             (r"major|department|field of study|specialization|stream|branch", p.get("major")),
             (r"street|address line|^address", p.get("address_line1")),
@@ -807,7 +807,7 @@ class GenericFormApplier:
                 return None
             return next((o for o in options if o.strip().lower() == want.lower()), None) or \
                    next((o for o in options if re.match(rf"{re.escape(want)}\b", o.strip(), re.I)), None)
-        if re.search(r"role|position|job title|applying for|applied for|post( name)?\b|opening|vacanc|department", l) and self.role:
+        if re.search(r"role|position|job title|apply(ing)? for|applied for|post( name)?\b|opening|vacanc|department", l) and self.role:
             want = self.role.lower()
             # the posting's own title first, then the family it belongs to (dropdowns list families: "Python", "AI/ML")
             fams = [r"back-?end|backend", r"full[- ]?stack", r"\bai\b|machine learning|\bml\b|gen ?ai|llm", r"data scien", r"python", r"software (engineer|developer)"]
