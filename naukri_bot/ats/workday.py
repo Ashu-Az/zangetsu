@@ -764,6 +764,8 @@ class WorkdayApplier:
                                 idx = next((k for k, n in enumerate(names) if re.search(r"company (career )?(site|website)|career site|corporate (site|website)|linkedin", n, re.I)), None)
                             if idx is None:
                                 idx = next((k for k, n in enumerate(names) if re.search(r"^other\b|other (job board|website)s?|general", n, re.I)), None)
+                            if idx is None:   # employee-status sub-lists (Citi: "Other" -> AMS / Citi Employee on Leave / Non Citi Employee)
+                                idx = next((k for k, n in enumerate(names) if re.search(r"^non[- ].{0,30}employee|^external( candidate| applicant)?$", n, re.I)), None)
                             if idx is None:   # any generic job board (Ashu, 14 Oct 2026), never a named rival board
                                 idx = next((k for k, n in enumerate(names) if re.search(
                                     r"\bjob ?boards?\b|job (portal|posting|site|search)s?|online (job|posting|advert)|^internet\b", n, re.I)
