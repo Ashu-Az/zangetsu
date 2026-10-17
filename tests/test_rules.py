@@ -371,3 +371,14 @@ def test_personal_social_media_declined():
     from naukri_bot.rules import rule_answer
     a = rule_answer("Would you be willing to share your Facebook profile with us?", ["Yes", "No"], "dropdown", {})
     assert a.selected_option_indices == [1]
+
+
+def test_social_media_url_box_left_empty():
+    a = rule_answer("Would you be willing to share your Facebook profile with us?", [], "text", {})
+    assert a is not None and a.answer_text == ""
+
+
+def test_how_heard_dropdown_without_naukri_picks_job_board():
+    opts = ["Pick one", "LinkedIn", "Referral", "Social Media", "Job Board"]
+    a = rule_answer("HOW DID YOU CROSS PATHS WITH US?", opts, "select", {})
+    assert a is not None and a.answer_text == "Job Board"

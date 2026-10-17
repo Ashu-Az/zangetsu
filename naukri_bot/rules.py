@@ -323,6 +323,13 @@ def _profile_fact(q: str, options: list[str], profile: dict, question_raw: str =
                                      r"where did you (hear|find|see) (about )?(us|this (job|role|opening))|source( of application)?|"
                                      r"how did you (come across|cross paths with|find|discover) (us|this (job|role|position|opening)))\??", q):
         return _answer("Naukri.com")
+    # the same question as a dropdown without Naukri (MyNextDeveloper: LinkedIn / Referral / Social Media / Job Board):
+    # Naukri is a job board
+    if has_opts and re.search(r"how did you (hear|learn|find out|come across|cross paths with|find|discover)|where did you (hear|find|see)|"
+                              r"^source( of application)?\??$", q):
+        i = _opt(options, r"naukri", r"job (board|portal|site|website)s?", r"^online job", r"^other( job board| website)?s?$")
+        if i is not None:
+            return _answer("", i, options)
     # ---- inbox questions, 16 Oct 2026
     # "Date Available" / earliest start date: the day after the last working day (immediate joiner)
     if not has_opts and re.fullmatch(r"(date available|available (from|date)|earliest (possible )?start date|start date|"
@@ -491,7 +498,8 @@ def rule_answer(question: str, options: list[str], kind: str, profile: dict) -> 
         if has_opts:
             i = _yes_no(options, False)
             return _answer(options[i], i, options) if i is not None else None
-        return _answer("No")
+        # a free-text box wants a URL (Abbott rejects "No" as "Invalid URL"): leave it empty, these are optional
+        return _answer("")
 
     # "What is your current status with <company>?" / "relationship with <company>": Ashu has never worked at the
     # companies he applies to (current employer is Quess Corp, not an applicant target)
