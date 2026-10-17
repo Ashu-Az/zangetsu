@@ -777,6 +777,8 @@ class WorkdayApplier:
                             if idx is None and len(names) == 1:
                                 idx = 0
                         if idx is None:
+                            if picked:                   # say what the sub-list offered, so the next fix is obvious
+                                log.info("    %s: after %s the sub-list had %s", label[:40], picked, names[:15])
                             break
                         opts[idx].click(); time.sleep(1.2)
                         picked.append(names[idx])
