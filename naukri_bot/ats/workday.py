@@ -100,7 +100,7 @@ class WorkdayApplier:
         if not WORK_AUTH_Q.search(label):
             return default
         if not self.job_location:   # Workday URLs carry the location: /job/Gurugram-Haryana-India/<title>_<id>
-            m = re.search(r"/job/([^/]+)/[^/]+$", getattr(self.pg, "url", "") or "")
+            m = re.search(r"/job/([^/]+)/", getattr(self.pg, "url", "") or "")
             self.job_location = m.group(1).replace("-", " ") if m else ""
         if re.search(r"\bindia\b|\bIND\b|bengaluru|bangalore|hyderabad|pune|chennai|mumbai|gurugram|gurgaon|noida|delhi|kolkata|ahmedabad",
                      self.job_location or "", re.I) and not re.search(r"remote\s*-?\s*(us|usa|uk|eu)|united states|singapore|dubai", self.job_location or "", re.I):
