@@ -573,8 +573,9 @@ class GenericFormApplier:
                         else:
                             self._unknown(f"{label} ({company or 'company not filled'})", [])
                         continue
-                    if re.search(r"i (agree|accept|consent|acknowledge|confirm|understand|certify|declare)|privacy|terms|consent", label, re.I) \
-                            and not el.is_checked():
+                    # "By using this form you agree with the storage and handling of your data" (Zerozilla, 17 Oct 2026)
+                    if (re.search(r"\b(i|you) (agree|accept|consent|acknowledge|confirm|understand|certify|declare)|privacy|terms|consent", label, re.I)
+                            or consent_only(label)) and not el.is_checked():
                         if consent_only(label):
                             el.check(force=True); self._note(label, "checked", "consent")
                         else:                                     # may be a legal claim: the person decides
