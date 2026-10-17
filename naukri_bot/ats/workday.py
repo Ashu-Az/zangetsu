@@ -602,7 +602,11 @@ class WorkdayApplier:
         return None, None
 
     def _open_options(self, ctl) -> list:
-        ctl.click()
+        try:
+            ctl.click(timeout=8000)
+        except Exception:   # a popup left open by the field before covers this one (Citi, 17 Oct 2026)
+            self.pg.keyboard.press("Escape"); time.sleep(0.5)
+            ctl.click(force=True, timeout=5000)
         time.sleep(1.2)
         return self._popup_options()
 
@@ -1069,7 +1073,15 @@ class WorkdayApplier:
                                       "School Not Listed", "Not in list", "Other University", "Other Institution", "Unlisted"],
                                       institution=ed["institution"])
                 deg = panel.locator(f"{A('formField-degree')} button[aria-haspopup='listbox']")
-                if deg.count():
+                # already set by the resume parser (Citi: aria-label "Degree B.Eng Required"): keep a bachelor's value
+                cur = (deg.first.get_attribute("aria-label") or "") if deg.count() else ""
+                if deg.count() and re.search(r"bachelor|b\.?\s?tech|b\.?\s?eng|\bb\.?e\.?\b|undergrad", re.sub(r"^degree\s*", "", cur, flags=re.I), re.I):
+                    self._note("Degree", re.sub(r"^degree\s*|\s*required$", "", cur, flags=re.I), "resume")
+                elif deg.count():
+                    try:
+                        deg.first.scroll_into_view_if_needed(timeout=5000)
+                    except Exception:
+                        pass
                     opts = self._open_options(deg.first)
                     names = [o.inner_text().strip() for o in opts]
                     idx = next((k for k, n in enumerate(names) if re.search(r"bachelor|b\.?\s?tech|b\.?\s?eng|^b\.?e\.?$|undergrad", n, re.I)), None)
