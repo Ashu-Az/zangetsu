@@ -486,6 +486,13 @@ def rule_answer(question: str, options: list[str], kind: str, profile: dict) -> 
         return _answer("About 2 years building LLM and RAG features in production with Python, FastAPI, LangChain, OpenAI / Azure OpenAI, "
                        "FAISS, PyTorch, Docker, Redis, PostgreSQL and MongoDB, plus React and Node.js on the full-stack side.")
 
+    # personal social media (Facebook/Instagram/X/Twitter/Snapchat): not shared on job applications; LinkedIn/GitHub are
+    if re.search(r"(share|provide|link to) your (facebook|instagram|twitter|x|snapchat|tiktok)\b|(facebook|instagram|twitter|snapchat|tiktok) (profile|account|handle|id)", q):
+        if has_opts:
+            i = _yes_no(options, False)
+            return _answer(options[i], i, options) if i is not None else None
+        return _answer("No")
+
     # "What is your current status with <company>?" / "relationship with <company>": Ashu has never worked at the
     # companies he applies to (current employer is Quess Corp, not an applicant target)
     if re.search(r"(current )?(status|relationship|association) with (?!quess)", q) and has_opts:

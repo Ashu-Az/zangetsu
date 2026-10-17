@@ -365,3 +365,9 @@ def test_status_with_company_is_external():
     o = ["Current Employee", "Former Employee", "External candidate (never employed)", "Contractor"]
     a = rule_answer("What is your current status with Open Text?", o, "dropdown", {})
     assert a and o[a.selected_option_indices[0]].startswith("External")
+
+
+def test_personal_social_media_declined():
+    from naukri_bot.rules import rule_answer
+    a = rule_answer("Would you be willing to share your Facebook profile with us?", ["Yes", "No"], "dropdown", {})
+    assert a.selected_option_indices == [1]
