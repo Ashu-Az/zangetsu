@@ -54,7 +54,10 @@ LABEL_JS = r"""e => {
     break;                                                        // nearby labels all belong to other fields
   }
   if (ok(ph) && !/^(select|search)/i.test(ph)) return clean(ph);
-  return named;
+  if (named) return named;
+  // react-select: the hint ("City") is a placeholder div named by aria-describedby (PyjamaHR, 17 Oct 2026)
+  const db = e.getAttribute('aria-describedby'); const dbt = db && (document.getElementById(db.split(' ')[0]) || {}).innerText;
+  return ok(dbt) ? clean(dbt) : '';
 }"""
 
 # Statements that are (or may be) legal claims about the candidate: never auto-ticked or auto-confirmed.
@@ -603,6 +606,15 @@ class GenericFormApplier:
                     el.select_option(label=pick); self._note(label, pick, "profile/rules"); continue
                 cur = el.input_value().strip()
                 val, src = self.value_for(label)
+                if cur and not re.search(r"[A-Za-z0-9]", cur):
+                    # resume autofill left only punctuation (PyjamaHR: a past job's Company Name was ",", 17 Oct 2026)
+                    company = self._company_for_row(el) if re.search(r"company|employer|organi[sz]ation", label, re.I) else None
+                    if company:
+                        el.fill(""); el.fill(company); self._note(label, company, "resume (replaced autofill)")
+                        continue
+                    el.fill(""); cur = ""
+                    if re.search(r"company|employer|organi[sz]ation", label, re.I):
+                        self._unknown(f"{label} (a past job's row: check it)", []); continue   # never the current employer here
                 if cur:
                     if val is not None and src == "profile" and cur != val and not re.search(r"cover|message|summary", label, re.I):
                         el.fill(""); el.fill(val); self._note(label, val, "profile (replaced autofill)")
@@ -614,7 +626,10 @@ class GenericFormApplier:
                     if el.get_attribute("required") is not None or el.get_attribute("aria-required") == "true" or "*" in label:
                         self._unknown(label, [])
                     continue
-                if typ == "textarea" or (typ == "text" and re.search(r"ctc|salary|notice|experience", label, re.I) and el.get_attribute("type") != "number"):
+                rupees = self._rupee_ctc(label, el.get_attribute("placeholder") or "")
+                if rupees:
+                    val = rupees
+                elif typ == "textarea" or (typ == "text" and re.search(r"ctc|salary|notice|experience", label, re.I) and el.get_attribute("type") != "number"):
                     val = with_unit(label, val)
                 el.fill(val); self._note(label, val, src)
             except Exception as e:
@@ -685,7 +700,49 @@ class GenericFormApplier:
             pick = self._pick(q, opts)
             if pick is None:
                 self._unknown(q, opts); continue
-            group.nth(opts.index(pick)).check(force=True); self._note(q, pick, "rules")
+            try:
+                group.nth(opts.index(pick)).check(force=True)
+            except Exception:   # styled radios (PyjamaHR gender) ignore check(): click the option's label instead
+                group.nth(opts.index(pick)).evaluate("e => (e.closest('label') || e).click()")
+            self._note(q, pick, "rules")
+
+    def _rupee_ctc(self, label: str, placeholder: str) -> str | None:
+        """A CTC box whose placeholder is a rupee amount ("450,000", "2,45,000": PyjamaHR) wants whole rupees in that
+        style, not "7.5 LPA" ("Invalid format. Ex: 2,45,000")."""
+        if not re.search(r"ctc|salary|compensation", label, re.I) or not re.fullmatch(r"\d{1,3}(,\d{2,3})+", placeholder.strip()):
+            return None
+        v = self.profile.get(("expected" if re.search(r"expect|desired", label, re.I) else "current") + "_ctc_lpa")
+        if v in (None, ""):
+            return None
+        n = str(int(round(float(v) * 100000)))
+        head, tail = n[:-3], n[-3:]                       # Indian grouping: 7,50,000 / 14,00,000
+        groups = []
+        while len(head) > 2:
+            groups.insert(0, head[-2:]); head = head[:-2]
+        return ",".join(([head] if head else []) + groups + [tail])
+
+    def _company_for_row(self, el) -> str | None:
+        """The company of a work-experience row, from the Job Title box beside it and the resume's entries."""
+        try:
+            title = el.evaluate("""e => {
+              // indexed rows: work_company_2 <-> work_company_designation_2 (PyjamaHR)
+              const m = (e.name || '').match(/^(.*?)_(\\d+)$/);
+              if (m) { const t = document.querySelector('input[name="' + m[1] + '_designation_' + m[2] + '"], input[name="' + m[1] + '_title_' + m[2] + '"]');
+                       if (t) return t.value; }
+              let p = e.parentElement;
+              for (let i = 0; i < 6 && p; i++, p = p.parentElement) {
+                const ts = [...p.querySelectorAll('input')].filter(x => x !== e && /title|designation|role/i.test(x.name + ' ' + x.id + ' ' + (x.placeholder || '')));
+                if (ts.length === 1) return ts[0].value;
+                if (ts.length > 1) return '';   // climbed past this row: several rows' titles, none is surely ours
+              }
+              return ''; }""")
+            from ..resume_variants import load_variants
+            for ex in load_variants()["core"].get("experience", []):
+                if title and ex.get("title", "").strip().lower() == title.strip().lower():
+                    return re.sub(r"\s*\(client:.*?\)", "", ex["company"]).strip()
+        except Exception:
+            pass
+        return None
 
     def _toggle_groups(self) -> None:
         """Ashby (and others) render yes/no questions as two toggle buttons, not radios (Cerebras' required 'Open to
@@ -698,7 +755,9 @@ class GenericFormApplier:
             const bs = [...box.children].filter(x => x.tagName === 'BUTTON' && /^(yes|no)$/i.test((x.innerText || '').trim()));
             if (bs.length !== 2) continue;
             seen.add(box);
-            let q = '', n = box;
+            // the question right before the group first (PyjamaHR: <p>question</p><div role=group>); a label found further
+            // up can belong to another field ("I am a recent graduate")
+            let q = (box.previousElementSibling && box.previousElementSibling.innerText) || '', n = box;
             for (let i = 0; i < 4 && n && !q; i++) { n = n.parentElement; const l = n && n.querySelector('label'); if (l) q = l.innerText; }
             const sel = bs.some(x => x.getAttribute('aria-pressed') === 'true' || x.getAttribute('aria-checked') === 'true'
                                      || /(^|[_-])(active|selected|checked)/i.test(x.className));
@@ -892,16 +951,27 @@ class GenericFormApplier:
                    next((o for o in options if o.lower().startswith(want.lower()[:5])), None)
         return None
 
+    def _option_loc(self, el):
+        """Open list's options: [role=option], or (react-select themes without roles: PyjamaHR's "list__option")
+        the option divs inside the listbox the input controls."""
+        ctl = el.get_attribute("aria-controls")
+        if not ctl or self.pg.locator("[role='option']").count():
+            return self.pg.locator("[role='option']")
+        return self.pg.locator(f"[id='{ctl}'] [class*='option']")
+
     def _combobox(self, el, label: str) -> None:
         pg = self.pg
         container = el.locator("xpath=ancestor::*[contains(@class,'select') or contains(@class,'Select')][1]")
-        if container.count() and re.search(r"\S", container.first.inner_text().replace(label, "")) and \
+        # react-select shows its hint ("City", "Years") in a "-placeholder" div while empty: that is not a value
+        empty_hint = el.evaluate("e => { const d = e.getAttribute('aria-describedby') || ''; "
+                                 "return /placeholder/.test(d) && !!document.getElementById(d.split(' ')[0]); }")
+        if not empty_hint and container.count() and re.search(r"\S", container.first.inner_text().replace(label, "")) and \
                 not re.search(r"select\.\.\.|^\s*select\s*$", container.first.inner_text(), re.I):
             return                                               # already has a value
         el.click(); time.sleep(0.8)
         names = []
         for k in range(8):                                     # options can load a few seconds after the menu opens
-            names = [o.inner_text().strip() for o in pg.locator("[role='option']").all() if o.is_visible()]
+            names = [o.inner_text().strip() for o in self._option_loc(el).all() if o.is_visible()]
             if names and not all(re.search(r"^(loading|no options)", n, re.I) for n in names):
                 break
             if k in (2, 5):                                    # a click sometimes leaves react-select closed: the arrow key opens it
@@ -911,6 +981,28 @@ class GenericFormApplier:
                     pass
             time.sleep(0.7)
         want = self._question_value(label.lower())
+        # "Total years of experience" as two lists, Years + Months (PyjamaHR: total_work_experience_years / _months)
+        yrs = float(self.profile.get("total_experience_years") or 0)
+        if re.search(r"experience.{0,10}months?\b", label, re.I):
+            want = str(int(round((yrs - int(yrs)) * 12)))
+        elif re.search(r"experience.{0,10}years?\b", label, re.I) and yrs:
+            want = str(int(yrs))
+        elif re.fullmatch(r"(current )?(city|location)\*?", label.strip(), re.I):
+            want = next(iter(self.profile.get("city_choices") or []), None) or self.profile.get("city")
+        is_city = bool(re.fullmatch(r"(current )?(city|location)\*?", label.strip(), re.I))
+        if want and (is_city or not names or all(re.search(r"^(loading|no options|type to search)", n, re.I) for n in names)):
+            # async lists (cities) stay empty until something is typed
+            for q in ([want] + [c for c in (self.profile.get("city_choices") or []) if c != want]
+                      if is_city else [want]):
+                el.fill(""); el.type(q[:25], delay=50); time.sleep(2)
+                names = [o.inner_text().strip() for o in self._option_loc(el).all() if o.is_visible()]
+                names = [n for n in names if not re.search(r"^(loading|no options)", n, re.I)]
+                if is_city:
+                    # "East Delhi" also finds "East Delhi, New York, United States": only an Indian place will do
+                    names = [n for n in names if re.match(rf"{re.escape(q)}\b", n, re.I) and re.search(r"\bindia\b", n, re.I)]
+                if names:
+                    want = names[0] if is_city else q
+                    break
         pick = None
         if want == "No" and names:                             # "No" is often a sentence: "I have never been employed by X..."
             pick = next((n for n in names if re.search(r"^no\b|\bnever\b|\b(have|has|do|did) not\b|\bi am not\b|\bnot (been|a|an|currently)\b", n, re.I)), None)
@@ -924,7 +1016,7 @@ class GenericFormApplier:
             pick = next((n for n in names if n.lower() == want.lower()), None)
             if pick is None and len(names) > 8:            # long lists: type to filter, then take the exact / closest match
                 el.type(want[:25], delay=40); time.sleep(1.5)
-                names = [o.inner_text().strip() for o in pg.locator("[role='option']").all() if o.is_visible()]
+                names = [o.inner_text().strip() for o in self._option_loc(el).all() if o.is_visible()]
                 # whole-word, prefix first: "India" must not match "British Indian Ocean Territory +246"
                 pick = next((n for n in names if n.lower() == want.lower()), None) or \
                        next((n for n in names if re.match(rf"{re.escape(want)}\b", n, re.I)), None) or \
@@ -950,7 +1042,7 @@ class GenericFormApplier:
                 el.fill(""); el.type(term, delay=50)
                 for _ in range(8):
                     time.sleep(0.8)
-                    names = [o.inner_text().strip() for o in pg.locator("[role='option']").all() if o.is_visible()]
+                    names = [o.inner_text().strip() for o in self._option_loc(el).all() if o.is_visible()]
                     if names and not all(re.search(r"^(loading|searching|no (options|results))", n, re.I) for n in names):
                         break
                 if term == "Other":
@@ -971,7 +1063,7 @@ class GenericFormApplier:
             if "*" in label:
                 self._unknown(label, names[:6])
             return
-        opt = next((o for o in pg.locator("[role='option']").all() if o.is_visible() and o.inner_text().strip() == pick), None)
+        opt = next((o for o in self._option_loc(el).all() if o.is_visible() and o.inner_text().strip() == pick), None)
         if opt is None:                                        # the list re-rendered and the option is gone
             pg.keyboard.press("Escape")
             self._unknown(label, names[:6])
