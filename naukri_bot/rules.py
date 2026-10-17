@@ -430,6 +430,9 @@ def rule_answer(question: str, options: list[str], kind: str, profile: dict) -> 
         yes = bool(profile["in_person_interview"])
         if has_opts:
             i = _yes_no(options, yes)
+            if i is None and not yes:
+                # availability wordings: "Not available" / "Can't attend" / "Virtual only"
+                i = _opt(options, r"not (available|possible)|unavailable|can'?t|cannot|unable", r"virtual|online|remote")
             return _answer(options[i], i, options) if i is not None else None
         return _answer("Yes" if yes else "No, I would prefer a virtual interview")
     # "Are you flexible moving to Bangalore?" / "okay to shift to Pune?" = relocation (Gushwork, 13 Oct 2026)
