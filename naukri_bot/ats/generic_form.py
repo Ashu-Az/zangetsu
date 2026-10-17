@@ -861,7 +861,8 @@ class GenericFormApplier:
             return next((o for o in options if re.search(r"decline|prefer not|do not wish|don.t wish", o, re.I)), None)
         if re.search(r"notice", l) and options and all(re.fullmatch(r"\s*(days?|weeks?|months?)\s*", o, re.I) for o in options):
             return next((o for o in options if re.match(r"\s*days?", o, re.I)), None)     # unit picker; the number goes in its own box
-        if re.search(r"employment status|current status|working status", l):
+        # "current status with <company>" asks about a tie to that employer (OpenText): left to rules.py
+        if re.search(r"employment status|current status|working status", l) and not re.search(r"status with ", l):
             return next((o for o in options if re.search(r"^employed|working|full[- ]?time|^experienced", o, re.I) and not re.search(r"un|self", o, re.I)), None)
         if re.search(r"qualification|degree|education", l):
             return next((o for o in options if re.search(r"bachelor|b\.?\s?tech|b\.?\s?e\b|graduat|under ?grad", o, re.I)

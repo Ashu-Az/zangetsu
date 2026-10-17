@@ -1103,7 +1103,7 @@ class WorkdayApplier:
                 self._note(f"Education {i + 1}", f"{ed['degree']} @ {ed['institution']}", "resume")
                 break
                except Exception as e:
-                log.warning("    education %d not filled (attempt %d): %s", i + 1, attempt, str(e)[:120])
+                log.warning("    education %d not filled (attempt %d): %s", i + 1, attempt, " ".join(str(e).split())[:500])
                 pg.keyboard.press("Escape"); time.sleep(2)
                 if attempt == 2:
                     self._unknown(f"Education {i + 1}", [])

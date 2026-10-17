@@ -268,3 +268,10 @@ def test_position_dropdown_picks_role_family():
     assert a._pick("post name", opts) == "Python"
     a.role = "Gen AI developer"
     assert a._pick("Job Applied for", ["Sales", "AI/ML Engineer", "HR"]) == "AI/ML Engineer"
+
+
+def test_current_status_with_company_picks_never_worked():
+    from naukri_bot.ats.generic_form import GenericFormApplier
+    x = GenericFormApplier.__new__(GenericFormApplier); x.profile = {}; x.role = "Software Developer"
+    opts = ["Please Select", " I am a current OpenText employee ", " I have never worked at OpenText "]
+    assert x._pick("What is your current status with Open Text? *", opts) == " I have never worked at OpenText "
