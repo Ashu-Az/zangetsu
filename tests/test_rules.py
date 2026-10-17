@@ -358,3 +358,10 @@ def test_state_from_profile():
     assert rule_answer("State*", [], "text", p).answer_text == "Delhi"
     assert rule_answer("State", ["NCT of Delhi", "Haryana"], "dropdown", p).answer_text == "NCT of Delhi"
     assert rule_answer("State", ["Select", "Delhi", "Goa"], "dropdown", p).selected_option_indices == [1]
+
+
+def test_status_with_company_is_external():
+    from naukri_bot.rules import rule_answer
+    o = ["Current Employee", "Former Employee", "External candidate (never employed)", "Contractor"]
+    a = rule_answer("What is your current status with Open Text?", o, "dropdown", {})
+    assert a and o[a.selected_option_indices[0]].startswith("External")

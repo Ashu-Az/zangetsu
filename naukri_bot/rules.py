@@ -486,6 +486,12 @@ def rule_answer(question: str, options: list[str], kind: str, profile: dict) -> 
         return _answer("About 2 years building LLM and RAG features in production with Python, FastAPI, LangChain, OpenAI / Azure OpenAI, "
                        "FAISS, PyTorch, Docker, Redis, PostgreSQL and MongoDB, plus React and Node.js on the full-stack side.")
 
+    # "What is your current status with <company>?" / "relationship with <company>": Ashu has never worked at the
+    # companies he applies to (current employer is Quess Corp, not an applicant target)
+    if re.search(r"(current )?(status|relationship|association) with (?!quess)", q) and has_opts:
+        i = next((k for k, o in enumerate(options) if re.search(r"external|not (a |an )?(current |former )?(employee|associated|affiliated)|never (been )?(employed|worked)|no (prior |previous )?(relationship|association|affiliation)|^none\b|new (candidate|applicant)|non-?employee", o, re.I)), None)
+        return _answer(options[i], i, options) if i is not None else None
+
     # state / province of residence: profile.state ("Delhi" also matches "NCT of Delhi", "Delhi (NCT)")
     if re.fullmatch(r"(current |your |home )?(state|state ?/ ?province|province|state of residence)( \(.*\))?", q) and profile.get("state"):
         st = str(profile["state"])
