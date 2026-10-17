@@ -963,7 +963,12 @@ class WorkdayApplier:
         inp = field.locator("input").first
         for q in searches:
             fallback = re.fullmatch(r"others?|not listed|school not listed|not in list|other university|other institution|unlisted", q.strip(), re.I)
-            inp.click(); inp.fill(""); self.pg.keyboard.type(q, delay=40); self.pg.keyboard.press("Enter"); time.sleep(2)
+            try:
+                inp.click(timeout=5000)
+            except Exception:   # Citi 17 Oct 2026: the previous search's popup sat over the box; close it, then force
+                self.pg.keyboard.press("Escape"); time.sleep(0.5)
+                inp.scroll_into_view_if_needed(timeout=5000); inp.click(force=True, timeout=5000)
+            inp.fill(""); self.pg.keyboard.type(q, delay=40); self.pg.keyboard.press("Enter"); time.sleep(2)
             if fallback:
                 # "Other", "Not Listed", "School Not Listed" - but never a country-specific one ("School Not Listed - UK")
                 opt = next((o for o in self._popup_options()
