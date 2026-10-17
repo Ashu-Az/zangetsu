@@ -612,6 +612,11 @@ def cmd_company_apply(settings: Settings, args) -> int:
             log.info("skip (excluded title): %s | %s", role[:60], url[:80]); continue
         if re.search(r"intern(ship)?s?\b|trainee|fresher", url + " " + role, re.I):   # internship pages are not the role
             log.info("skip (internship/trainee page): %s", url[:100]); continue
+        from .cooldown import paused_until as _paused
+        host = re.sub(r"^https?://(www\.)?", "", url).split("/")[0]
+        held = next((h for h in ("smartrecruiters", "workday", "greenhouse", "lever", "ashby", "pyjamahr", "keka") if h in host and _paused(h)), None)
+        if held:   # the ATS flagged us as a bot: stay off it until the cooldown ends
+            log.info("skip (%s cooldown until %s): %s", held, _paused(held), url[:100]); continue
         kept.append((url, role, jd_url))
     entries = kept
     Settings.browser_profile_dir = property(lambda self, d=args.browser_profile: STATE_DIR / d)
