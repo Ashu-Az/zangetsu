@@ -343,3 +343,10 @@ def test_relocation_city_any_offered():
     assert a2.selected_option_indices == [0]         # any real city beats Skip
     assert rule_answer("Please select the city you are currently residing or willing to relocate to",
                        opts, "radio", {"willing_to_relocate": False}) is None
+
+
+def test_source_and_skills_variants():
+    from naukri_bot.rules import rule_answer
+    p = {"skills_primary": ["Python", "RAG"], "skills_secondary": []}
+    assert rule_answer("HOW DID YOU CROSS PATHS WITH US?", [], "text", p).answer_text == "Naukri.com"
+    assert rule_answer("PRIMARY SKILLS / EXPERTISE", [], "text", p).answer_text == "Python, RAG"

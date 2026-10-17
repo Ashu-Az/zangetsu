@@ -320,7 +320,8 @@ def _profile_fact(q: str, options: list[str], profile: dict, question_raw: str =
     # "How did you hear about us?" as a free-text box: these jobs are found through Naukri (Ashu's sources: Other, then
     # Naukri; a dropdown is handled by the form adapters)
     if not has_opts and re.fullmatch(r"(how did you (hear|learn|find out) about (us|this (job|role|position|opening))|"
-                                     r"where did you (hear|find|see) (about )?(us|this (job|role|opening))|source( of application)?)\??", q):
+                                     r"where did you (hear|find|see) (about )?(us|this (job|role|opening))|source( of application)?|"
+                                     r"how did you (come across|cross paths with|find|discover) (us|this (job|role|position|opening)))\??", q):
         return _answer("Naukri.com")
     # ---- inbox questions, 16 Oct 2026
     # "Date Available" / earliest start date: the day after the last working day (immediate joiner)
@@ -490,7 +491,7 @@ def rule_answer(question: str, options: list[str], kind: str, profile: dict) -> 
         return _answer(str(profile.get("middle_name") or "NA"))
 
     # skill-set fields: the confirmed primary skills, then secondary ones (comma list, ~12 items)
-    if not has_opts and re.fullmatch(r"(your |primary |key |technical |core |main )?(skill ?sets?|skills|tech(nical)? stack|key skills)( \(.*\))?", q):
+    if not has_opts and re.fullmatch(r"(your |primary |key |technical |core |main )?(skill ?sets?|skills|tech(nical)? stack|key skills)( ?(/|and|&) ?(expertise|experience))?( \(.*\))?", q):
         sk = list(dict.fromkeys((profile.get("skills_primary") or []) + (profile.get("skills_secondary") or [])))[:12]
         if sk:
             return _answer(", ".join(sk))
