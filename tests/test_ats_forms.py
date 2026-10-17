@@ -258,3 +258,13 @@ def test_position_applying_for_text_gets_the_role(label):
     g = applier()
     g.role = "AI/ML Engineer"
     assert g._question_value(label) == "AI/ML Engineer"
+
+
+def test_position_dropdown_picks_role_family():
+    from naukri_bot.ats.generic_form import GenericFormApplier
+    a = GenericFormApplier.__new__(GenericFormApplier)
+    a.profile, a.role = {}, "Python / NodeJS (Backend Developer)"
+    opts = ["Android developer", "Java developer", "Php", "Python", "SEO"]
+    assert a._pick("post name", opts) == "Python"
+    a.role = "Gen AI developer"
+    assert a._pick("Job Applied for", ["Sales", "AI/ML Engineer", "HR"]) == "AI/ML Engineer"

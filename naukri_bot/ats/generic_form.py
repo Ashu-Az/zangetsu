@@ -802,9 +802,12 @@ class GenericFormApplier:
                 return None
             return next((o for o in options if o.strip().lower() == want.lower()), None) or \
                    next((o for o in options if re.match(rf"{re.escape(want)}\b", o.strip(), re.I)), None)
-        if re.search(r"role|position|job title|applying for|department", l) and self.role:
+        if re.search(r"role|position|job title|applying for|applied for|post( name)?\b|opening|vacanc|department", l) and self.role:
             want = self.role.lower()
-            for pat in (re.escape(want), r"back-?end|backend", r"full[- ]?stack", r"\bai\b|machine learning|ml", r"software engineer"):
+            # the posting's own title first, then the family it belongs to (dropdowns list families: "Python", "AI/ML")
+            fams = [r"back-?end|backend", r"full[- ]?stack", r"\bai\b|machine learning|\bml\b|gen ?ai|llm", r"data scien", r"python", r"software (engineer|developer)"]
+            fams = [f for f in fams if re.search(f, want, re.I)] + [f for f in fams if not re.search(f, want, re.I)]
+            for pat in [re.escape(want)] + fams[:2]:
                 hit = next((o for o in options if re.search(pat, o, re.I)), None)
                 if hit:
                     return hit
