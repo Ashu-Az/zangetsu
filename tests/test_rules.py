@@ -350,3 +350,11 @@ def test_source_and_skills_variants():
     p = {"skills_primary": ["Python", "RAG"], "skills_secondary": []}
     assert rule_answer("HOW DID YOU CROSS PATHS WITH US?", [], "text", p).answer_text == "Naukri.com"
     assert rule_answer("PRIMARY SKILLS / EXPERTISE", [], "text", p).answer_text == "Python, RAG"
+
+
+def test_state_from_profile():
+    from naukri_bot.rules import rule_answer
+    p = {"state": "Delhi"}
+    assert rule_answer("State*", [], "text", p).answer_text == "Delhi"
+    assert rule_answer("State", ["NCT of Delhi", "Haryana"], "dropdown", p).answer_text == "NCT of Delhi"
+    assert rule_answer("State", ["Select", "Delhi", "Goa"], "dropdown", p).selected_option_indices == [1]

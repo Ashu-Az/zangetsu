@@ -486,6 +486,16 @@ def rule_answer(question: str, options: list[str], kind: str, profile: dict) -> 
         return _answer("About 2 years building LLM and RAG features in production with Python, FastAPI, LangChain, OpenAI / Azure OpenAI, "
                        "FAISS, PyTorch, Docker, Redis, PostgreSQL and MongoDB, plus React and Node.js on the full-stack side.")
 
+    # state / province of residence: profile.state ("Delhi" also matches "NCT of Delhi", "Delhi (NCT)")
+    if re.fullmatch(r"(current |your |home )?(state|state ?/ ?province|province|state of residence)( \(.*\))?", q) and profile.get("state"):
+        st = str(profile["state"])
+        if has_opts:
+            i = next((k for k, o in enumerate(options) if o.strip().lower() == st.lower()), None)
+            if i is None:
+                i = next((k for k, o in enumerate(options) if re.search(rf"\b{re.escape(st)}\b", o, re.I)), None)
+            return _answer(options[i], i, options) if i is not None else None
+        return _answer(st)
+
     # middle name: the profile name has none -> "NA" (required text fields reject blanks)
     if re.fullmatch(r"(your )?middle name", q) and not has_opts:
         return _answer(str(profile.get("middle_name") or "NA"))
