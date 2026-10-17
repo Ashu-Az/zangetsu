@@ -866,7 +866,14 @@ class GenericFormApplier:
                 return None
             return next((o for o in options if o.strip().lower() == want.lower()), None) or \
                    next((o for o in options if re.match(rf"{re.escape(want)}\b", o.strip(), re.I)), None)
-        if re.search(r"role|position|job title|apply(ing)? for|applied for|post( name)?\b|opening|vacanc|department", l) and self.role:
+        # "Preferred Location" with a fixed list (Credencesoft: Bhubaneswar / Navi Mumbai): the first option that is one of
+        # the profile's preferred locations ("Navi Mumbai" counts as Mumbai)
+        if re.search(r"preferred (job |work )?location|location preference|preferred city", l):
+            prefs = [str(x).lower() for x in (self.profile.get("preferred_locations") or [])]
+            hit = next((o for pref in prefs for o in options if re.search(rf"\b{re.escape(pref)}\b", o, re.I)), None)
+            if hit:
+                return hit
+        if re.search(r"role|position|job title|apply(ing)? for|applied for|post( name)?\b|opening|vacanc|department|\btrack\b|domain of interest", l) and self.role:
             want = self.role.lower()
             # the posting's own title first, then the family it belongs to (dropdowns list families: "Python", "AI/ML")
             fams = [r"back-?end|backend", r"full[- ]?stack", r"\bai\b|machine learning|\bml\b|gen ?ai|llm", r"data scien", r"python", r"software (engineer|developer)"]
