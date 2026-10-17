@@ -382,3 +382,12 @@ def test_how_heard_dropdown_without_naukri_picks_job_board():
     opts = ["Pick one", "LinkedIn", "Referral", "Social Media", "Job Board"]
     a = rule_answer("HOW DID YOU CROSS PATHS WITH US?", opts, "select", {})
     assert a is not None and a.answer_text == "Job Board"
+
+
+def test_abbott_bachelors_degree_and_hcp():
+    p = {"degree": "B.Tech"}
+    a = rule_answer("Do you have\xa0Bachelor's/University\xa0Professional Degree?", ["Select One", "Yes", "No"], "dropdown", p)
+    assert a.answer_text == "Yes"
+    q = ("State and federal law require Abbott to track and report certain payments ... health care professionals (HCPs) ... "
+         "Are you: (A) A physician - MD ... (B) a Massachusetts-licensed prescriber ..., or (C) None of the above.")
+    assert rule_answer(q, ["Select One", "A", "B", "C"], "dropdown", p).answer_text == "C"

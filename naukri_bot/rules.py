@@ -493,6 +493,22 @@ def rule_answer(question: str, options: list[str], kind: str, profile: dict) -> 
         return _answer("About 2 years building LLM and RAG features in production with Python, FastAPI, LangChain, OpenAI / Azure OpenAI, "
                        "FAISS, PyTorch, Docker, Redis, PostgreSQL and MongoDB, plus React and Node.js on the full-stack side.")
 
+    # "Do you have a Bachelor's / University Professional Degree?" (Abbott, 17 Oct 2026): yes when the profile's degree
+    # is a bachelor's (B.Tech / B.E. / B.Sc / BCA ...)
+    if has_opts and re.search(r"do you (have|hold|possess) (a |an )?(bachelor|university|graduate|undergraduate|engineering)\b.{0,50}degree", q) \
+            and re.search(r"^b\.?\s?(tech|e|sc|s|a|ca|eng)\b|bachelor", str(profile.get("degree") or profile.get("highest_education") or ""), re.I):
+        i = _yes_no(options, True)
+        if i is not None:
+            return _answer(options[i], i, options)
+    # US health-care-professional (HCP) disclosure (Abbott): "(A) A physician ... (B) a Massachusetts-licensed prescriber
+    # ... (C) None of the above", options are the letters. A software engineer is none of these.
+    if has_opts and re.search(r"health ?care professionals?|\bhcps?\b|licensed prescriber|physician", q):
+        m = re.search(r"\(([a-e])\)\s*none of the above", q)
+        i = next((k for k, o in enumerate(options) if (m and o.strip().lower() == m.group(1))
+                  or re.search(r"none of the above|^no\b|not a (physician|health)", o, re.I)), None)
+        if i is not None:
+            return _answer(options[i], i, options)
+
     # personal social media (Facebook/Instagram/X/Twitter/Snapchat): not shared on job applications; LinkedIn/GitHub are
     if re.search(r"(share|provide|link to) your (facebook|instagram|twitter|x|snapchat|tiktok)\b|(facebook|instagram|twitter|snapchat|tiktok) (profile|account|handle|id)", q):
         if has_opts:
