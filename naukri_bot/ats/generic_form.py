@@ -21,7 +21,11 @@ log = logging.getLogger(__name__)
 LABEL_JS = r"""e => {
   const ok = t => t && /[A-Za-z]{2}/.test(t) && t.trim().length > 1;
   const clean = t => t.replace(/\s+/g, ' ').trim().slice(0, 160);
-  const byFor = e.id && document.querySelector('label[for="' + CSS.escape(e.id) + '"]');
+  // ids reused across fields (Webingo: six inputs all id="inputEmail4", 17 Oct 2026): document-wide lookup returns the
+  // first field's label, so only trust label[for] that sits beside this field
+  const forSel = e.id && 'label[for="' + CSS.escape(e.id) + '"]';
+  const dupId = e.id && document.querySelectorAll('[id="' + CSS.escape(e.id) + '"]').length > 1;
+  const byFor = forSel && (dupId ? (e.parentElement ? e.parentElement.querySelector(forSel) : null) : document.querySelector(forSel));
   if (byFor && ok(byFor.innerText)) return clean(byFor.innerText);
   const aria = e.getAttribute('aria-label'); if (ok(aria)) return clean(aria);
   const lb = e.getAttribute('aria-labelledby');
