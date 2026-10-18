@@ -171,7 +171,9 @@ BLOCK_COMPANY_JS = r"""e => {
 }"""
 
 CONFIRM_RX = re.compile(r"thank you( for (applying|your application|your interest|submitting))?|thanks for (applying|taking the time)|"
-                        r"application (has been )?(received|submitted)|successfully (applied|submitted)|we.ll be in touch", re.I)
+                        r"application (has been )?(received|submitted)|successfully (applied|submitted|sent)|we.ll be in touch|"
+                        # Elementor / WordPress forms clear themselves and say so (Providentia, 18 Oct 2026)
+                        r"submission (was|has been) (successful|received|sent)|your (message|form|details) (was|has been) (sent|submitted|received)", re.I)
 
 
 def confirmation_seen(before_body: str, after_body: str, before_url: str = "", after_url: str = "",
@@ -609,7 +611,19 @@ class GenericFormApplier:
                     self._combobox(el, label)
                     continue
                 if typ == "select":
-                    if el.input_value() and not re.search(r"select|choose|^$", el.evaluate("e => e.options[e.selectedIndex]?.text || ''"), re.I):
+                    shown = el.evaluate("e => e.options[e.selectedIndex]?.text || ''")
+                    first = el.evaluate("e => e.selectedIndex") == 0
+                    if el.input_value() and not re.search(r"select|choose|^$", shown, re.I) and not first:
+                        continue
+                    if el.input_value() and first and not re.search(r"select|choose|^$", shown, re.I):
+                        # the list's first real option shown by default ("Data Analyst", "Masters": Providentia) is not an
+                        # answer: pick by the rules, keep the default only when the rules agree or have nothing
+                        opts0 = [o.strip() for o in el.locator("option").all_inner_texts()]
+                        pick0 = self._pick(label, [o for o in opts0 if o])
+                        if pick0 and pick0.strip() != shown.strip():
+                            el.select_option(label=pick0); self._note(label, pick0, "profile/rules")
+                        elif pick0 is None and len(opts0) > 1 and "*" in label:
+                            self._unknown(f"{label} (shows '{shown}' by default)", opts0)
                         continue
                     opts = [o.strip() for o in el.locator("option").all_inner_texts()]
                     real = [o for o in opts if o and not re.search(r"^(select|choose|--)", o, re.I)]

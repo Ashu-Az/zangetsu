@@ -275,3 +275,8 @@ def test_current_status_with_company_picks_never_worked():
     x = GenericFormApplier.__new__(GenericFormApplier); x.profile = {}; x.role = "Software Developer"
     opts = ["Please Select", " I am a current OpenText employee ", " I have never worked at OpenText "]
     assert x._pick("What is your current status with Open Text? *", opts) == " I have never worked at OpenText "
+
+
+def test_elementor_success_message_counts_as_confirmation():
+    from naukri_bot.ats.generic_form import confirmation_seen
+    assert confirmation_seen("Apply Now For Success", "Apply Now For Success Your submission was successful.")
