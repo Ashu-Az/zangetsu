@@ -657,8 +657,11 @@ def cmd_company_apply(settings: Settings, args) -> int:
                                          assist=False, submit=args.submit).run(url)
                 else:
                     # Greenhouse, Lever, Ashby, Keka, Zoho Recruit and plain career pages: label-driven filler
-                    res = GenericFormApplier(b.page, profile, str(pdf), role=title, submit=args.submit,
-                                             code_file=str(Path("state/security-code.txt").resolve()) if args.submit else None).run(url)
+                    gf = GenericFormApplier(b.page, profile, str(pdf), role=title, submit=args.submit,
+                                            code_file=str(Path("state/security-code.txt").resolve()) if args.submit else None)
+                    if "naukri.com" in (jd_url or ""):
+                        gf.fallback_country = "India"   # pipeline only keeps Naukri postings in Indian locations
+                    res = gf.run(url)
             except Exception as e:
                 b.save_debug("company-apply-crash")
                 log.warning("  crashed: %s", str(e)[:150])

@@ -728,6 +728,10 @@ class GenericFormApplier:
             opts = [r.evaluate(LABEL_JS) for r in group.all()]
             # option labels that repeat the question ("Are you at least 18 years old? yes" / "... no", Infor): the
             # shared prefix is the real question, the remainders are the options
+            longs = [r.evaluate("e => { const i = e.getAttribute('aria-labelledby'); const n = i && document.getElementById(i.split(' ')[0]); "
+                                "return (n && n.innerText || '').trim(); }") for r in group.all()]
+            if len(longs) >= 2 and all(o and len(o) > 15 for o in longs):
+                opts = longs                                  # Infor: visible "Yes"/"No", full text via aria-labelledby
             if len(opts) >= 2 and all(o and len(o) > 15 for o in opts):
                 pre = os.path.commonprefix(opts)
                 pre = pre[: pre.rfind("?") + 1] if "?" in pre else pre
@@ -1238,6 +1242,8 @@ class GenericFormApplier:
             self._start_country = job_country_from(self._page_text(), self.pg.url)
         except Exception:
             self._start_country = None
+        # neither page says where the job is: the listing it came from does (a Naukri India posting, Infor 18 Oct 2026)
+        self._start_country = self._start_country or getattr(self, "fallback_country", None)
         if not self.open_form():
             self.result.status, self.result.notes = "no_form", "no application form found (email-only or listing page)"
             return self.result
