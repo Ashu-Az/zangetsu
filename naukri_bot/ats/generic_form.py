@@ -139,7 +139,7 @@ def job_country_from(text: str, url: str = "") -> str | None:
     places abroad), 'mixed' (both), or None (no evidence). 'Indianapolis' and 'Indiana' are not India."""
     # legal footers name places that are not the job's ("California Supplemental Privacy Notice", "US Only" EEO
     # links: Infor, 18 Oct 2026)
-    text = re.sub(r"california (supplemental |consumer )?(privacy|notice)[^\n]*|\(?\bus only\b\)?|"
+    text = re.sub(r"california [\w ]{0,30}?(privacy|notice|statement|policy|act|rights|disclosure)[^\n]*|\(?\bus only\b\)?|"
                   r"(eeo|equal employment|pay transparency|know your rights)[^\n]*", " ", text or "", flags=re.I)
     hay = f"{text}\n{re.sub(r'[-_/+.%=?&]+', ' ', url or '')}"
     india, abroad = bool(_INDIA.search(hay)), bool(_ABROAD.search(hay))
