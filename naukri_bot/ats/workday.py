@@ -855,6 +855,19 @@ class WorkdayApplier:
                         continue
                     names = [(f.locator(f"label[for='{c.get_attribute('id')}']").inner_text().strip()
                               if c.get_attribute("id") else "") for c in checks.all()]
+                    # a list of office locations ("Bangalore, India / Chennai, India / Pune, India", athenahealth): tick
+                    # every one that is in profile.preferred_locations (Bangalore = Bengaluru)
+                    prefs = {str(x).lower() for x in (self.profile.get("preferred_locations") or [])}
+                    prefs |= {"bangalore"} if "bengaluru" in prefs else set()
+                    prefs |= {"gurgaon"} if "gurugram" in prefs else set()
+                    if names and all(re.fullmatch(r"[A-Za-z .()-]+,\s*[A-Za-z .]+", n or "") for n in names):
+                        hits = [k for k, n in enumerate(names) if n.split(",")[0].strip().lower() in prefs]
+                        if hits:
+                            for k in hits:
+                                lab = f.locator(f"label[for='{checks.nth(k).get_attribute('id')}']")
+                                (lab.first.click() if lab.count() else checks.nth(k).check(force=True)); time.sleep(0.4)
+                            self._note(label, ", ".join(names[k] for k in hits), "profile")
+                            continue
                     idx = self._choice_for(label, names)
                     if idx is None:
                         self._unknown(label, names); continue
