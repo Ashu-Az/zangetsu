@@ -352,7 +352,8 @@ class GenericFormApplier:
             (r"resume (link|url)|cv (link|url)|link to (your )?(resume|cv)", links.get("resume")),   # a shared Drive link, when set
             (r"linkedin", links.get("linkedin")), (r"github", links.get("github")),
             (r"portfolio|website|personal (site|url)", links.get("portfolio") or links.get("github")),
-            (r"\bcity\b|current location|location", p.get("location")), (r"postal|pin ?code|zip", p.get("postal_code")),
+            (r"\bcity\b|\btown\b|current location|location", p.get("location")), (r"postal|post ?code|pin ?code|zip", p.get("postal_code")),
+            (r"address (line )?2|address line two|street address 2", p.get("address_line2")),
             (r"address", p.get("address_line1")), (r"current (company|employer|organi[sz]ation)", p.get("current_company")),
             (r"current (title|designation|role|position)", p.get("current_title")),
             (r"^degree\b|degree name|qualif[a-z]*tion", p.get("degree")),
@@ -711,6 +712,13 @@ class GenericFormApplier:
             q = group.first.evaluate("e => { const f = e.closest('fieldset'); const l = f && f.querySelector('legend'); "
                                      "return ((l && l.innerText) || (e.closest('div') && e.closest('div').parentElement.innerText.split('\\n')[0]) || '').trim(); }")
             opts = [r.evaluate(LABEL_JS) for r in group.all()]
+            # option labels that repeat the question ("Are you at least 18 years old? yes" / "... no", Infor): the
+            # shared prefix is the real question, the remainders are the options
+            if len(opts) >= 2 and all(o and len(o) > 15 for o in opts):
+                pre = os.path.commonprefix(opts)
+                pre = pre[: pre.rfind("?") + 1] if "?" in pre else pre
+                if len(pre) > 15:
+                    q, opts = pre.strip(), [o[len(pre):].strip().capitalize() for o in opts]
             pick = self._pick(q, opts)
             if pick is None:
                 self._unknown(q, opts); continue
