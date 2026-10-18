@@ -280,3 +280,12 @@ def test_current_status_with_company_picks_never_worked():
 def test_elementor_success_message_counts_as_confirmation():
     from naukri_bot.ats.generic_form import confirmation_seen
     assert confirmation_seen("Apply Now For Success", "Apply Now For Success Your submission was successful.")
+
+
+def test_work_auth_the_country_in_which_phrase_uses_job_country():
+    from naukri_bot.ats.generic_form import GenericFormApplier
+    x = GenericFormApplier.__new__(GenericFormApplier)
+    x.profile = {"work_authorized_in": ["India"]}
+    x._authorized_here = lambda: True
+    q = "are you legally authorised to work in the country in which the role you are applying for is based?"
+    assert x._work_auth_value(q) == "Yes"

@@ -266,8 +266,9 @@ class GenericFormApplier:
         auth_l = [str(a).strip().lower() for a in auth if a]
         sponsor = re.search(r"sponsor", l)
         named = re.search(r"\bto work in ([a-z ]+?)(\?|$|\.|,| without| for)", l)       # "authorized to work in India?"
-        if named and named.group(1).strip() not in ("the country", "this country", "the location", "this location",
-                                                     "the country where this job is located", "your current location"):
+        # "the country in which the role you are applying for is based" (Infor) names no country: any "the/this
+        # country/location..." phrase means the job's own country
+        if named and not re.match(r"(the|this|that|your) (country|location|jurisdiction|region|place)\b", named.group(1).strip()):
             place = named.group(1).strip()
             ok = place in auth_l
         else:
