@@ -108,6 +108,12 @@ def run(b, settings, profile, tracker, handler_factory, max_apps: int, rounds: i
     from .models import ApplyMode
     pg = b.page
     b.goto(URL, settle=(6, 8))
+    if re.search(r"access denied|you don.t have permission to access", pg.inner_text("body"), re.I):
+        # Akamai bot block (19 Oct 2026): stop touching Naukri for a while instead of retrying into a longer ban
+        from .cooldown import pause
+        pause("naukri", 8, "Akamai 'Access Denied' on Neo (bot detection)")
+        log.error("Naukri returned Access Denied (bot block); Naukri paused 8 h.")
+        return 0
     applied = 0
     recent = tracker.recent_role_keys(days=60, include_saved=False)   # applied elsewhere already (Easemytrip, 11 Oct)
     for rnd in range(rounds):
