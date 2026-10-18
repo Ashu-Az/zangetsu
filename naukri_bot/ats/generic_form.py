@@ -244,6 +244,9 @@ class GenericFormApplier:
         if url not in self._country_cache:
             self._country_cache[url] = job_country_from(self._page_text(), url)
         found = self._country_cache[url]
+        fb = getattr(self, "fallback_country", None)
+        if found == "mixed" and fb:          # a phone-code country list names every country (Infor): trust the listing
+            return fb
         return found if found is not None else self._start_country
 
     def _authorized_here(self) -> bool | None:
