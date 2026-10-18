@@ -103,22 +103,25 @@ def apply_card(b, card: dict, handler_factory) -> str:
     return "failed:no 'Successfully applied' message"
 
 
-def run(b, settings, profile, tracker, handler_factory, max_apps: int, rounds: int = 3) -> int:
+def run(b, settings, profile, tracker, handler_factory, max_apps: int, rounds: int = 6) -> int:
     from .ranking import eligibility
     from .models import ApplyMode
     pg = b.page
     b.goto(URL, settle=(6, 8))
     applied = 0
+    recent = tracker.recent_role_keys(days=60, include_saved=False)   # applied elsewhere already (Easemytrip, 11 Oct)
     for rnd in range(rounds):
         cards = read_cards(pg)
         log.info("Neo round %d: %d suggestion(s)", rnd + 1, len(cards))
         fits = []
         for c in cards:
             job = _posting(c)
-            why = "already handled" if tracker.is_seen(job.job_id) else eligibility(job, ApplyMode.NAUKRI, settings, profile)
+            why = ("already handled" if tracker.is_seen(job.job_id) else
+                   "already applied (same company + title)" if tracker.role_key(c["company"], c["title"]) in recent else
+                   eligibility(job, ApplyMode.NAUKRI, settings, profile))
             log.info("  %-45s | %-28s | %-10s -> %s", c["title"][:45], c["company"][:28], c["experience"], why or "fits")
             if why:
-                if why != "already handled":
+                if why not in ("already handled",) and not why.startswith("already applied"):
                     tracker.mark_seen(job.job_id, why)
                 continue
             fits.append(c)
