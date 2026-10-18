@@ -14,6 +14,15 @@ cd "$(dirname "$0")/.." || exit 1
 LOG="output/cycles/protocol-$(date +%Y%m%d-%H%M).log"; mkdir -p output/cycles
 PY=.venv/bin/python
 gap() { s=$(( 10 + RANDOM % 11 )); echo "--- next step in ${s}s $(date +%H:%M)"; sleep "$s"; }
+# a browser profile no open window holds (forms left open for Ashu keep theirs locked)
+free_profile() {
+  for p in ats-profile-2 ats-profile-3 ats-profile-4 ats-profile-5 ats-profile-6 ats-profile-7 ats-profile-8 ats-profile; do
+    lock="state/$p/SingletonLock"
+    pid=$(readlink "$lock" 2>/dev/null | sed 's/.*-//')
+    if [ -z "$pid" ] || ! kill -0 "$pid" 2>/dev/null; then echo "$p"; return; fi
+  done
+  echo ats-profile-manual
+}
 {
   echo "=== protocol $(date)"
   echo "=== 1. Neo"
@@ -38,7 +47,7 @@ rows = [r for r in csv.DictReader(open("output/company_site_jobs.csv", encoding=
 open("output/cycles/company-today.txt", "w").write("".join(f'{r["external_url"]} | {r["title"]} | {r["naukri_url"]}\n' for r in rows))
 print("company-site jobs to apply:", len(rows))
 PYEOF
-  [ -s output/cycles/company-today.txt ] && $PY -m naukri_bot company-apply --file output/cycles/company-today.txt --submit --no-wait --browser-profile ats-profile-2
+  [ -s output/cycles/company-today.txt ] && $PY -m naukri_bot company-apply --file output/cycles/company-today.txt --submit --no-wait --browser-profile "$(free_profile)"
   gap
   echo "=== 5. startups + top companies (web-found ATS boards, Workday)"
   $PY -m naukri_bot workday-run --submit --days 3 --max 8
@@ -59,8 +68,10 @@ new = [r for r in keep if r.apply_url.split("token=")[-1] not in done and r.url 
 print("top boards:", st, "new fits:", [(r.company, r.title) for r in new])
 if new:
     open("output/cycles/top-new.txt", "w").write("\n".join(f"{r.apply_url} | {r.title}" for r in new) + "\n")
+    prof = subprocess.run(["bash", "-c", "source <(sed -n '/^free_profile()/,/^}/p' scripts/protocol.sh); free_profile"],
+                          capture_output=True, text=True).stdout.strip() or "ats-profile-3"
     subprocess.run([".venv/bin/python", "-m", "naukri_bot", "company-apply", "--file", "output/cycles/top-new.txt",
-                    "--submit", "--no-wait", "--browser-profile", "ats-profile-3"])
+                    "--submit", "--no-wait", "--browser-profile", prof])
 PYEOF
   gap
   echo "=== 6. Wellfound, Hirist"
