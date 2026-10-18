@@ -609,7 +609,10 @@ class GenericFormApplier:
                     if (re.search(r"\b(i|you) (agree|accept|consent|acknowledge|confirm|understand|certify|declare)|privacy|terms|consent", label, re.I)
                             or consent_only(label)) and not el.is_checked():
                         if consent_only(label):
-                            el.check(force=True); self._note(label, "checked", "consent")
+                            el.check(force=True)
+                            if not el.is_checked():   # styled box (Infor): the click must land on its label
+                                el.evaluate("e => (e.closest('label') || document.querySelector('label[for=\"' + e.id + '\"]') || e).click()")
+                            self._note(label, "checked" if el.is_checked() else "NOT ticked", "consent" if el.is_checked() else "unknown")
                         else:                                     # may be a legal claim: the person decides
                             self._unknown(label, [])
                     continue
