@@ -630,7 +630,9 @@ class GenericFormApplier:
                         pick0 = self._pick(label, [o for o in opts0 if o])
                         if pick0 and pick0.strip() != shown.strip():
                             el.select_option(label=pick0); self._note(label, pick0, "profile/rules")
-                        elif pick0 is None and len(opts0) > 1 and "*" in label:
+                        elif pick0 is None and len(opts0) > 1 and ("*" in label or re.search(r"educat|qualif|degree|position|role", label, re.I)):
+                            # no option fits (Providentia's Education: Masters / Diploma / High School, no Bachelor's):
+                            # never let a wrong default stand
                             self._unknown(f"{label} (shows '{shown}' by default)", opts0)
                         continue
                     opts = [o.strip() for o in el.locator("option").all_inner_texts()]
