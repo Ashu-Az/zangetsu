@@ -228,7 +228,8 @@ def is_priority_company(company: str) -> bool:
 
 
 def sort_key(job: JobPosting, settings: Settings):
-    """Top companies first, then most Naukri match-score ticks, applicant tier, exact count and age; unknown counts last."""
+    """Fewest applicants first (Ashu's protocol, 18 Oct 2026), then top companies, most Naukri match-score ticks and
+    newest; unknown counts last."""
     a = job.applicants if job.applicants is not None else UNKNOWN_APPLICANTS
     age = parse_age_days(job.posted)
-    return (0 if is_priority_company(job.company) else 1, -job.match_count(), tier_of(job.applicants, settings.applicant_tiers), a, age if age is not None else 99)
+    return (a, 0 if is_priority_company(job.company) else 1, -job.match_count(), age if age is not None else 99)

@@ -768,6 +768,24 @@ def cmd_nvites(settings: Settings, args) -> int:
     return 0
 
 
+def cmd_neo(settings: Settings, args) -> int:
+    """Naukri Neo suggestions: filter each card, apply with Neo's tailored resume, answer questions (rules + model)."""
+    from . import neo
+    from .cooldown import paused_until
+    until = paused_until("naukri")
+    if until:
+        log.error("Naukri cooldown until %s; not applying.", until); return 0
+    profile, tracker, cache = load_profile(), Tracker(), AnswerCache()
+    llm = make_llm(settings)
+    with Browser(settings) as b:
+        if not b.ensure_logged_in():
+            log.error("Not logged in to Naukri."); return 1
+        factory = lambda job: DrawerHandler(b, llm, cache, tracker, job, assist=args.assist)   # noqa: E731
+        n = neo.run(b, settings, profile, tracker, factory, max_apps=args.max)
+        log.info("Neo applied this run: %d", n)
+    return 0
+
+
 TOP_SITES_FILE = Path("inputs/naukri-top-company-sites.txt")
 TOP_ROTATION = Path("state/top_company_rotation.json")
 
@@ -994,6 +1012,9 @@ def main(argv: list[str] | None = None) -> None:
     ca.add_argument("--no-wait", action="store_true", help="do not pause on each filled form")
     ca.add_argument("--browser-profile", default="ats-profile", help="separate profile lets two runs (or an open window) coexist")
     ca.add_argument("--hold", action="store_true", help="open every form in its own tab, fill, and keep the window open for you")
+    ne = sub.add_parser("neo", help="apply to Naukri Neo suggestions that pass the filters (Neo-tailored resume)")
+    ne.add_argument("--max", type=int, default=8)
+    ne.add_argument("--assist", action="store_true", help="wait for you on questions neither rules nor the model answer")
     nv = sub.add_parser("nvites", help="apply to Naukri NVites (recruiter invitations) that pass the filters")
     nv.add_argument("--max", type=int, default=15)
     nv.add_argument("--dry-run", action="store_true", help="list what it would apply to")
@@ -1022,5 +1043,5 @@ def main(argv: list[str] | None = None) -> None:
     args = p.parse_args(argv)
     setup_logging(args.verbose)
     settings = Settings()
-    cmd = {"login": cmd_login, "run": cmd_run, "scrape": cmd_scrape, "tailor": cmd_tailor, "ask": cmd_ask, "profile": cmd_profile, "portal": cmd_portal, "leads": cmd_leads, "workday": cmd_workday, "workday-run": cmd_workday_run, "company-apply": cmd_company_apply, "refresh": cmd_refresh, "nvites": cmd_nvites, "top-company-sites": cmd_top_company_sites, "early-access": cmd_early_access, "outreach": cmd_outreach}[args.cmd]
+    cmd = {"login": cmd_login, "run": cmd_run, "scrape": cmd_scrape, "tailor": cmd_tailor, "ask": cmd_ask, "profile": cmd_profile, "portal": cmd_portal, "leads": cmd_leads, "workday": cmd_workday, "workday-run": cmd_workday_run, "company-apply": cmd_company_apply, "refresh": cmd_refresh, "nvites": cmd_nvites, "neo": cmd_neo, "top-company-sites": cmd_top_company_sites, "early-access": cmd_early_access, "outreach": cmd_outreach}[args.cmd]
     sys.exit(cmd(settings, args))

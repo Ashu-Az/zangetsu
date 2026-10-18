@@ -147,6 +147,19 @@ def tailored_pdf(jd_text: str, title: str, company: str, playwright=None, url: s
         report["dropped"] = apply_plan(r, json.loads(plan.read_text()), data, corpus)
         report["plan"] = plan.name
     cov = ats_report(resume_text(r), jd_text)                 # keyword coverage against the JD itself
+    # ATS target 90+ (Ashu, 18 Oct 2026): add the JD's missing keywords that are TRUE for Ashu (they pass the
+    # grounding check against his resume, profile and confirmed skills) to the skills section. Keywords he does
+    # not have stay missing: the score is reported as it is, never padded with false skills.
+    if cov["score"] < 90 and cov["missing"]:
+        from .grounding import check_text
+        from .llm import SkillGroup
+        # positively present in the facts (resume, profile skills, confirmed skills) AND not flagged: an unknown tool
+        # ("SnapLogic") passes check_text but is not in the corpus, so it is never added
+        add = [k for k in cov["missing"] if corpus.has_phrase(k) and not check_text(k, "skills", corpus)]
+        if add:
+            r.skills = list(r.skills) + [SkillGroup(name="Also used", items=add)]
+            cov = ats_report(resume_text(r), jd_text)
+            report["ats_added"] = add
     report["ats"], report["ats_hit"], report["ats_missing"] = cov["score"], cov["matched"], cov["missing"]
     report["coverage"] = cov
     out = OUTPUT_DIR / "resumes" / "tailored"
