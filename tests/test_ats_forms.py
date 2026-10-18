@@ -289,3 +289,9 @@ def test_work_auth_the_country_in_which_phrase_uses_job_country():
     x._authorized_here = lambda: True
     q = "are you legally authorised to work in the country in which the role you are applying for is based?"
     assert x._work_auth_value(q) == "Yes"
+
+
+def test_job_country_ignores_legal_footer_places():
+    from naukri_bot.ats.generic_form import job_country_from
+    t = "Join our platform team in Hyderabad.\nCalifornia Supplemental Privacy Notice\nEEO Statement (US Only)"
+    assert job_country_from(t) == "India"

@@ -137,7 +137,11 @@ def consent_only(label: str) -> bool:
 def job_country_from(text: str, url: str = "") -> str | None:
     """Where the job is, from the page: 'India' (India / an Indian city named, nothing abroad), 'other' (only
     places abroad), 'mixed' (both), or None (no evidence). 'Indianapolis' and 'Indiana' are not India."""
-    hay = f"{text or ''}\n{re.sub(r'[-_/+.%=?&]+', ' ', url or '')}"
+    # legal footers name places that are not the job's ("California Supplemental Privacy Notice", "US Only" EEO
+    # links: Infor, 18 Oct 2026)
+    text = re.sub(r"california (supplemental |consumer )?(privacy|notice)[^\n]*|\(?\bus only\b\)?|"
+                  r"(eeo|equal employment|pay transparency|know your rights)[^\n]*", " ", text or "", flags=re.I)
+    hay = f"{text}\n{re.sub(r'[-_/+.%=?&]+', ' ', url or '')}"
     india, abroad = bool(_INDIA.search(hay)), bool(_ABROAD.search(hay))
     if india and abroad:
         return "mixed"
