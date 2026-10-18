@@ -300,3 +300,9 @@ def test_job_country_ignores_legal_footer_places():
 def test_job_country_ignores_california_supply_chain_footer():
     from naukri_bot.ats.generic_form import job_country_from
     assert job_country_from("Apply for this job\nCalifornia Supply Chain Statement") is None
+
+
+def test_cover_letter_box_regex_catches_hint_and_name():
+    import re
+    rx = r"cover[ _-]?letter|why (do you|are you|you.?re|you are)|interested in (this|the) (role|job|position)"
+    assert re.search(rx, "Tell us why you're interested in this role... cover letter", re.I)

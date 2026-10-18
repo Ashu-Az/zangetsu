@@ -661,7 +661,12 @@ class GenericFormApplier:
                     if val is not None and src == "profile" and cur != val and not re.search(r"cover|message|summary", label, re.I):
                         el.fill(""); el.fill(val); self._note(label, val, "profile (replaced autofill)")
                     continue
-                if val is None and re.search(r"cover letter|why (do you|are you)|about yourself|tell us about you\b|describe yourself|\bbio\b|message|additional information|summary|introduction|intro\b", label, re.I):
+                # the field's own name counts too: NRT's box is name="cover_letter" with only a heading and the hint
+                # "Tell us why you're interested in this role..." (18 Oct 2026) - optional, so it was skipped silently
+                hay = f"{label} {el.get_attribute('name') or ''} {el.get_attribute('id') or ''}".replace("_", " ")
+                if val is None and re.search(r"cover[ _-]?letter|why (do you|are you|you.?re|you are)|interested in (this|the) (role|job|position)|"
+                                             r"motivation|about yourself|tell us about you\b|describe yourself|\bbio\b|message|"
+                                             r"additional information|summary|introduction|intro\b", hay, re.I):
                     canned = rule_answer("Why should we hire you?", [], "text", self.profile)
                     val, src = (canned.answer_text, "canned") if canned else (None, "")
                 if val is None:
