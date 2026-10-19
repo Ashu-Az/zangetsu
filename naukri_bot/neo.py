@@ -134,7 +134,7 @@ def run(b, settings, profile, tracker, handler_factory, max_apps: int, rounds: i
                          for m in [re.search(rx, body)] if m), None)
             if chip and _click_text(pg, chip):
                 log.info("  asked Neo: %s", chip)
-                time.sleep(12)
+                _wait_for(pg, r"Apply now|Apply to all|No new jobs|couldn.t find", 45); time.sleep(3)
                 cards = read_cards(pg)
         log.info("Neo round %d: %d suggestion(s)", rnd + 1, len(cards))
         fits = []
