@@ -1227,8 +1227,11 @@ class GenericFormApplier:
         for k in range(forms.count()):
             cands = [b for b in forms.nth(k).locator("button[type='submit'], input[type='submit'], "
                                                      "button:not([type='button']):not([type='reset'])").all() if vis(b)]
-            btn = next((b for b in cands if re.search(r"submit|apply|send|finish", text(b), re.I)), None) or \
+            aria = lambda b: (b.get_attribute("aria-label") or b.get_attribute("title") or "")   # noqa: E731
+            btn = next((b for b in cands if re.search(r"submit|apply|send|finish", text(b) + " " + aria(b), re.I)), None) or \
                   (cands[0] if len(cands) == 1 else None)
+            if btn is None and cands and not text(cands[-1]) and (cands[-1].get_attribute("type") or "") == "submit":
+                btn = cands[-1]        # icon-only Submit at the end of the form (SparkBrains, 19 Oct 2026)
             if btn is not None:
                 return btn
         # page-wide: real buttons first; a link only when its whole text is a submit phrase
