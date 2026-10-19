@@ -87,6 +87,7 @@ def apply_card(b, card: dict, handler_factory) -> str:
         tail = pg.inner_text("body")[-300:].replace("\n", " | ")
         if re.search(r"\bApplied\b|already applied", tail, re.I):
             return "failed:already applied"
+        b.save_debug("neo-no-apply")
         return "failed:no Apply now (" + tail[-120:] + ")"
     step = _wait_for(pg, r"Tailor Resume first|Apply with original Resume|Add missing details|Successfully applied", 20)
     if step and "Tailor Resume first" in step:
@@ -108,6 +109,7 @@ def apply_card(b, card: dict, handler_factory) -> str:
         log.info("    answered %d question(s)", len(res.answered))
     if _wait_for(pg, r"Successfully applied", 25) and pg.inner_text("body").count("Successfully applied") > before:
         return "applied"
+    b.save_debug("neo-not-confirmed")
     return "failed:no 'Successfully applied' message"
 
 
