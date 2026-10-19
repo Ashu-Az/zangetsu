@@ -134,7 +134,11 @@ def run(b, settings, profile, tracker, handler_factory, max_apps: int, rounds: i
                          for m in [re.search(rx, body)] if m), None)
             if chip and _click_text(pg, chip):
                 log.info("  asked Neo: %s", chip)
-                _wait_for(pg, r"Apply now|Apply to all|No new jobs|couldn.t find", 45); time.sleep(3)
+                end = time.time() + 90                       # cards took ~50 s to arrive (19 Oct 2026)
+                while time.time() < end and not pg.locator(TITLE).count() and \
+                        not re.search(r"No new jobs|couldn.t find", pg.inner_text("body")):
+                    time.sleep(3)
+                time.sleep(3)
                 cards = read_cards(pg)
         log.info("Neo round %d: %d suggestion(s)", rnd + 1, len(cards))
         fits = []
