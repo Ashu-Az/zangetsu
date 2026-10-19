@@ -84,7 +84,10 @@ def apply_card(b, card: dict, handler_factory) -> str:
         t.evaluate("e => e.click()")
     time.sleep(4)
     if not _click_text(pg, "Apply now"):
-        return "failed:no Apply now"
+        tail = pg.inner_text("body")[-300:].replace("\n", " | ")
+        if re.search(r"\bApplied\b|already applied", tail, re.I):
+            return "failed:already applied"
+        return "failed:no Apply now (" + tail[-120:] + ")"
     step = _wait_for(pg, r"Tailor Resume first|Apply with original Resume|Add missing details|Successfully applied", 20)
     if step and "Tailor Resume first" in step:
         _click_text(pg, "Tailor Resume first ✨") or _click_text(pg, "Tailor Resume first")
@@ -138,8 +141,15 @@ def run(b, settings, profile, tracker, handler_factory, max_apps: int, rounds: i
                 while time.time() < end and not pg.locator(TITLE).count() and \
                         not re.search(r"No new jobs|couldn.t find", pg.inner_text("body")):
                     time.sleep(3)
-                time.sleep(3)
+                last = -1                                    # cards stream in one by one: wait until the count settles
+                for _ in range(10):
+                    n = pg.locator(TITLE).count()
+                    if n == last:
+                        break
+                    last = n; time.sleep(4)
                 cards = read_cards(pg)
+                if not cards:
+                    log.info("  Neo said: %s", pg.inner_text("body")[-500:].replace("\n", " | "))
         log.info("Neo round %d: %d suggestion(s)", rnd + 1, len(cards))
         fits = []
         for c in cards:
