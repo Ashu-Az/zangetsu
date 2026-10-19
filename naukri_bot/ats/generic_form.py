@@ -666,7 +666,9 @@ class GenericFormApplier:
                 # the field's own name counts too: NRT's box is name="cover_letter" with only a heading and the hint
                 # "Tell us why you're interested in this role..." (18 Oct 2026) - optional, so it was skipped silently
                 hay = f"{label} {el.get_attribute('name') or ''} {el.get_attribute('id') or ''}".replace("_", " ")
-                if val is None and re.search(r"cover[ _-]?letter|why (do you|are you|you.?re|you are)|interested in (this|the) (role|job|position)|"
+                # Cyepro: "Anything else we should know? (optional)" / hint "Why this role, when you can join..." (19 Oct 2026)
+                if val is None and re.search(r"cover[ _-]?letter|why (do you|are you|you.?re|you are|would you|did you|this role|us|join)|interested in (this|the) (role|job|position)|"
+                                             r"anything else|like to join|want to join|\bnote\b|"
                                              r"motivation|about yourself|tell us about you\b|describe yourself|\bbio\b|message|"
                                              r"additional information|summary|introduction|intro\b", hay, re.I):
                     canned = rule_answer("Why should we hire you?", [], "text", self.profile)
