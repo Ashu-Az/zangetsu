@@ -137,8 +137,12 @@ class WellfoundPortal(Portal):
             if not box.is_visible() or not box.is_enabled():
                 continue
             name = box.get_attribute("name") or ""
+            q = self._question_for(dlg, box) if "customQuestion" in name else ""
+            if "customQuestion" in name and not q.strip() and not note_done:
+                # an unlabelled custom box is the company's "What interests you about working for this company?" note
+                # (Ind-US Target, 19 Oct 2026): write the cover note there
+                name = ""
             if "customQuestion" in name:
-                q = self._question_for(dlg, box)
                 ans = answerer(q, [], "text") if q else None
                 if not ans or not (ans.answer_text or "").strip():
                     pg.keyboard.press("Escape")
