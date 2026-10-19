@@ -52,8 +52,10 @@ def steady_wait(settings) -> float:
 
 
 def between_applies(settings) -> float:
-    """The gap between two applications: the same steady rhythm as page loads (no bursts, no long breaks)."""
-    return steady_wait(settings)
+    """The gap between two applications: about a minute (Ashu, 19 Oct 2026: "be gentle"), steady, no bursts."""
+    s = random.uniform(50, 80)
+    time.sleep(s)
+    return s
 
 
 def pace_page(page, settings) -> None:

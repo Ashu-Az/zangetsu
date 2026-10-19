@@ -13,7 +13,7 @@
 cd "$(dirname "$0")/.." || exit 1
 LOG="output/cycles/protocol-$(date +%Y%m%d-%H%M).log"; mkdir -p output/cycles
 PY=.venv/bin/python
-gap() { s=$(( 10 + RANDOM % 11 )); echo "--- next step in ${s}s $(date +%H:%M)"; sleep "$s"; }
+gap() { s=$(( 60 + RANDOM % 61 )); echo "--- next step in ${s}s $(date +%H:%M)"; sleep "$s"; }
 # a browser profile no open window holds (forms left open for Ashu keep theirs locked)
 free_profile() {
   for p in ats-profile-2 ats-profile-3 ats-profile-4 ats-profile-5 ats-profile-6 ats-profile-7 ats-profile-8 ats-profile; do
