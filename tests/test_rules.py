@@ -391,3 +391,9 @@ def test_abbott_bachelors_degree_and_hcp():
     q = ("State and federal law require Abbott to track and report certain payments ... health care professionals (HCPs) ... "
          "Are you: (A) A physician - MD ... (B) a Massachusetts-licensed prescriber ..., or (C) None of the above.")
     assert rule_answer(q, ["Select One", "A", "B", "C"], "dropdown", p).answer_text == "C"
+
+
+def test_cctc_ectc_shorthand():
+    p = {"current_ctc_lpa": 7.5, "expected_ctc_lpa": 14}
+    assert rule_answer("CCTC", [], "text", p) is not None
+    assert rule_answer("ECTC", [], "text", p) is not None
