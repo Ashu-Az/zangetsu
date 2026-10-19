@@ -119,6 +119,8 @@ def run(b, settings, profile, tracker, handler_factory, max_apps: int, rounds: i
         pause("naukri", 8, "Akamai 'Access Denied' on Neo (bot detection)")
         log.error("Naukri returned Access Denied (bot block); Naukri paused 8 h.")
         return 0
+    # the chat renders a few seconds after load: wait for cards or one of Neo's openers
+    _wait_for(pg, r"Suggestions for you|No new jobs|Show missed jobs|Apply now|Apply to all", 20)
     applied = 0
     recent = tracker.recent_role_keys(days=60, include_saved=False)   # applied elsewhere already (Easemytrip, 11 Oct)
     for rnd in range(rounds):
@@ -127,7 +129,8 @@ def run(b, settings, profile, tracker, handler_factory, max_apps: int, rounds: i
             # Neo's openers when it has no cards (19 Oct 2026): "Show missed jobs" after "No new jobs at the moment",
             # or the "Welcome back!" suggestion chips ("Show me latest Machine Learning Engineer openings")
             body = pg.inner_text("body")
-            chip = next((m.group(0).strip() for rx in (r"Show missed jobs", r"Show me latest [^\n|]+? openings", r"Find me [^\n|]+? jobs")
+            chip = next((m.group(0).strip() for rx in (r"Show missed jobs", r"Show me latest [^\n|]+? openings", r"Find jobs matching my profile",
+                                                         r"Find me [^\n|]+? jobs")
                          for m in [re.search(rx, body)] if m), None)
             if chip and _click_text(pg, chip):
                 log.info("  asked Neo: %s", chip)
