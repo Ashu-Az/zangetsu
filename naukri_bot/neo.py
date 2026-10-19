@@ -118,6 +118,10 @@ def run(b, settings, profile, tracker, handler_factory, max_apps: int, rounds: i
     recent = tracker.recent_role_keys(days=60, include_saved=False)   # applied elsewhere already (Easemytrip, 11 Oct)
     for rnd in range(rounds):
         cards = read_cards(pg)
+        if not cards and _click_text(pg, "Show missed jobs"):
+            # "No new jobs at the moment ... show you jobs that you may have missed in last few days?" (19 Oct 2026)
+            time.sleep(10)
+            cards = read_cards(pg)
         log.info("Neo round %d: %d suggestion(s)", rnd + 1, len(cards))
         fits = []
         for c in cards:
