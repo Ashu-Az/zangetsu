@@ -123,10 +123,16 @@ def run(b, settings, profile, tracker, handler_factory, max_apps: int, rounds: i
     recent = tracker.recent_role_keys(days=60, include_saved=False)   # applied elsewhere already (Easemytrip, 11 Oct)
     for rnd in range(rounds):
         cards = read_cards(pg)
-        if not cards and _click_text(pg, "Show missed jobs"):
-            # "No new jobs at the moment ... show you jobs that you may have missed in last few days?" (19 Oct 2026)
-            time.sleep(10)
-            cards = read_cards(pg)
+        if not cards:
+            # Neo's openers when it has no cards (19 Oct 2026): "Show missed jobs" after "No new jobs at the moment",
+            # or the "Welcome back!" suggestion chips ("Show me latest Machine Learning Engineer openings")
+            body = pg.inner_text("body")
+            chip = next((m.group(0).strip() for rx in (r"Show missed jobs", r"Show me latest [^\n|]+? openings", r"Find me [^\n|]+? jobs")
+                         for m in [re.search(rx, body)] if m), None)
+            if chip and _click_text(pg, chip):
+                log.info("  asked Neo: %s", chip)
+                time.sleep(12)
+                cards = read_cards(pg)
         log.info("Neo round %d: %d suggestion(s)", rnd + 1, len(cards))
         fits = []
         for c in cards:
