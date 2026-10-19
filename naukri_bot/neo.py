@@ -77,7 +77,12 @@ def apply_card(b, card: dict, handler_factory) -> str:
     """Apply to one card. Returns 'applied' | 'failed:<why>'."""
     pg = b.page
     before = pg.inner_text("body").count("Successfully applied")
-    pg.locator(TITLE, has_text=card["title"]).first.click(); time.sleep(4)
+    t = pg.locator(TITLE, has_text=card["title"]).last          # newest copy of the card
+    try:
+        t.scroll_into_view_if_needed(timeout=5000); t.click(timeout=5000)
+    except Exception:                                            # cards in a sideways carousel: click in the page
+        t.evaluate("e => e.click()")
+    time.sleep(4)
     if not _click_text(pg, "Apply now"):
         return "failed:no Apply now"
     step = _wait_for(pg, r"Tailor Resume first|Apply with original Resume|Add missing details|Successfully applied", 20)
