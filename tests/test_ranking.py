@@ -50,7 +50,9 @@ def test_eligibility_rules():
     assert eligibility(ok, ApplyMode.NAUKRI, s, profile) is None
     assert eligibility(ok, ApplyMode.ALREADY_APPLIED, s, profile) == "already_applied"
     assert eligibility(JobPosting(job_id="2", url="u", title="Data Scientist Intern", experience="0 - 2", applicants=1), ApplyMode.NAUKRI, s, profile) == "excluded_title"
-    assert eligibility(JobPosting(job_id="3", url="u", title="Java Developer", experience="1 - 4", applicants=1), ApplyMode.NAUKRI, s, profile) == "title_not_in_include_list"
+    # any software title passes the broad match (25 Oct 2026); a non-software title is still outside the include list
+    assert eligibility(JobPosting(job_id="3", url="u", title="Java Developer", experience="1 - 4", applicants=1), ApplyMode.NAUKRI, s, profile) is None
+    assert eligibility(JobPosting(job_id="3b", url="u", title="Sales Executive", experience="1 - 4", applicants=1), ApplyMode.NAUKRI, s, profile) == "title_not_in_include_list"
     assert eligibility(JobPosting(job_id="4", url="u", title="Full Stack Developer", experience="5 - 9 years", applicants=1), ApplyMode.NAUKRI, s, profile).startswith("experience_mismatch")
     assert eligibility(JobPosting(job_id="5", url="u", title="Full Stack Developer", experience="1 - 3 years", applicants=101), ApplyMode.COMPANY_SITE, s, profile) == "too_many_applicants:101"
     assert eligibility(JobPosting(job_id="6", url="u", title="Full Stack Developer", experience="1 - 3 years", applicants=None), ApplyMode.COMPANY_SITE, s, profile) is None
@@ -70,7 +72,7 @@ def test_freshness_parsing_and_filter():
     from naukri_bot.ranking import parse_age_days, too_old
     assert parse_age_days("Posted: Just now") == 0
     assert parse_age_days("Few Hours Ago") == 0
-    assert parse_age_days("Posted: 5 hours ago") == 0
+    assert 0.2 < parse_age_days("Posted: 5 hours ago") < 0.21          # hours are fractions of a day (22 Oct 2026)
     assert parse_age_days("Today") == 0
     assert parse_age_days("1 Day Ago") == 1
     assert parse_age_days("Posted: 4 days ago") == 4

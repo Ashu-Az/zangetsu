@@ -46,6 +46,10 @@ def parse_age_days(text: str) -> float | None:
     t = (text or "").lower()
     if not t.strip():
         return None
+    # hours count as a fraction of a day, so "2 hours ago" ranks fresher than "19 hours ago" (22 Oct 2026)
+    m = re.search(r"(\d+)\s*(minute|min|hour|hr)s?\b", t)
+    if m:
+        return round(int(m.group(1)) / (1440 if m.group(2).startswith("min") else 24), 3)
     if any(k in t for k in ("just now", "few hours", "hour ago", "hours ago", "minute", "today")):
         return 0.0
     t = re.sub(r"\b(a|an)\s+(day|week|month|year)\b", r"1 \2", t)          # "a year ago" (Wellfound)
@@ -120,7 +124,20 @@ def title_included(title: str, profile: dict) -> bool:
     core = re.sub(r"[^a-z ]", " ", t).split()
     if " ".join(core) in {"engineer", "developer", "programmer", "executive"}:
         return False  # a bare "Engineer" says nothing about the role (observed: an energy-plant post)
-    return not inc or any(_kw_in(k, t) for k in inc)
+    # punctuation-free copy: "AI / ML Developer" (Amantra, 24 Oct 2026) must match "ai/ml" and "ai ml"
+    flat = " ".join(core)
+    if not inc or any(_kw_in(k, t) or _kw_in(" ".join(re.sub(r"[^a-z ]", " ", k.lower()).split()), flat) for k in inc):
+        return True
+    # broad match (Ashu, 25 Oct 2026: "it should do regex not exact search, we don't have to miss any job"): any
+    # software / data / AI title counts; non-software roles that share words ("Power Engineer", "Sales Analyst") do not
+    tech = re.search(r"\b(develop\w*|programmer|engineer\w*|sde|swe|scientist|analyst|data|ai|ml|llm|nlp|gen ?ai|python|java\w*|"
+                     r"react\w*|node\w*|angular|full ?-?stack|front ?-?end|back ?-?end|software|web|cloud|devops|mlops|aiops|"
+                     r"automation|vision|database|sql|api|integration|technical|tech|it|application|platform|bi)\b", flat)
+    non_software = re.search(r"\b(sales|marketing|hr|recruit\w*|account\w*|finance|valuation|mechanical|civil|electrical|power|"
+                             r"hardware|silicon|synthesis|telephony|rf|chemical|biomedical|pharma\w*|clinical|mainframe|"
+                             r"customer|support|bpo|teacher|tutor|nurse|doctor|legal|supply chain|logistics coordinator|"
+                             r"designer|ux|ui ux|graphic|content|seo|domain manager|business development)\b", flat)
+    return bool(tech) and not non_software
 
 
 def title_excluded(title: str, profile: dict) -> bool:
@@ -128,6 +145,8 @@ def title_excluded(title: str, profile: dict) -> bool:
     t = re.sub(r"members? of (the )?technical staff", "mts", title.lower())
     # EY's "GDS-Staff" / "Staff Consultant" is its junior grade (2-4 yrs), not a staff-level role (Neo, 15 Oct 2026)
     t = re.sub(r"\bgds[- ]staff\b|\bstaff (consultant|analyst)\b", "gds", t)
+    # "Senior Associate" / "Senior Analyst" are 2-4 year grades (Amgen, LatentView), not senior roles (24 Oct 2026)
+    t = re.sub(r"\b(senior|sr\.?) (associate|analyst)\b", r"\2", t)
     if any(_kw_in(k, t) for k in profile.get("exclude_title_keywords", []) or []):
         return True
     # whole words only: "java" must not exclude "JavaScript Developer", "rust" must not hit "Trust & Safety"
@@ -228,8 +247,8 @@ def is_priority_company(company: str) -> bool:
 
 
 def sort_key(job: JobPosting, settings: Settings):
-    """Fewest applicants first (Ashu's protocol, 18 Oct 2026), then top companies, most Naukri match-score ticks and
-    newest; unknown counts last."""
+    """Fewest applicants first, then the freshest posting (Ashu, 22 Oct 2026: "increasing order of number of
+    applicants and fresh few hours"); top companies and Naukri match ticks only break ties. Unknown counts last."""
     a = job.applicants if job.applicants is not None else UNKNOWN_APPLICANTS
     age = parse_age_days(job.posted)
-    return (a, 0 if is_priority_company(job.company) else 1, -job.match_count(), age if age is not None else 99)
+    return (a, age if age is not None else 99, 0 if is_priority_company(job.company) else 1, -job.match_count())

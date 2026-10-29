@@ -228,6 +228,10 @@ def test_naukri_match_score_filter_and_order():
     assert eligibility(unknown, ApplyMode.NAUKRI, s, prof) is None
     # fewest applicants first (Ashu, 18 Oct 2026): 1 applicant beats 40, whatever the match ticks
     assert sorted([strong, unknown], key=lambda j: sort_key(j, s))[0] is unknown
+    assert sorted([unknown, strong], key=lambda j: sort_key(j, s))[0] is unknown         # fewest applicants first (Ashu, 22 Oct 2026)
+    fresh = JobPosting(job_id="4", url="u", title="AI Engineer", applicants=40, posted="2 hours ago")
+    stale = JobPosting(job_id="5", url="u", title="AI Engineer", applicants=40, posted="20 hours ago")
+    assert sorted([stale, fresh], key=lambda j: sort_key(j, s))[0] is fresh              # same count: the freshest first
 
 
 def test_months_nationality_qualification():

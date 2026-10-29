@@ -46,6 +46,16 @@ class Browser:
             kwargs["executable_path"] = self.settings.browser_executable
         self.context = self.pw.chromium.launch_persistent_context(**kwargs)
         self.context.set_default_timeout(15000)
+        # never hand an email link to macOS: a click on an "Apply" that is really mailto: opened Apple Mail on Ashu's
+        # Mac (22 Oct 2026). Block it in every page; the address is kept on the link for the outreach step (Gmail).
+        self.context.add_init_script("""
+            document.addEventListener('click', e => {
+              const a = e.target && e.target.closest && e.target.closest('a[href^="mailto:"]');
+              if (a) { e.preventDefault(); e.stopPropagation(); window.__blockedMailto = a.getAttribute('href'); }
+            }, true);
+            const _open = window.open;
+            window.open = function(u, ...r) { if (String(u || '').startsWith('mailto:')) { window.__blockedMailto = u; return null; } return _open.call(window, u, ...r); };
+        """)
         self.page = self.context.pages[0] if self.context.pages else self.context.new_page()
         from .humanize import pace_page                       # steady ~10 s rhythm on every page load
         for pg in self.context.pages:

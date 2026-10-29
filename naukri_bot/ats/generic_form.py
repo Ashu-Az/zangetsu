@@ -91,6 +91,7 @@ CONSENT_OK = re.compile(
     r"share (my|your) (details|data|information|resume|cv)|(may|will) be (kept|retained|stored)|"
     # "Cyepro may store my application and CV for 12 months to consider me for jobs" (19 Oct 2026)
     r"store (my|your) (application|cv|resume|details|data|information)|consider me for (future )?(jobs|roles|openings)|"
+    r"(may|to|can) (store|keep|hold) my (application|cv|resume|data|details)|"            # Cyepro (21 Oct 2026)
     r"(point of |cross[- ]border )?data transfer|transfer of (my |your )?(personal )?(data|information)|"   # Lynx (13 Oct 2026)
     # "how my information will be processed / used" (Visa Workday, 14 Oct 2026)
     r"how (my|your) (personal )?(data|information) (will be|is|are) (processed|used|handled|stored|collected)|"
@@ -139,6 +140,11 @@ def consent_only(label: str) -> bool:
 def job_country_from(text: str, url: str = "") -> str | None:
     """Where the job is, from the page: 'India' (India / an Indian city named, nothing abroad), 'other' (only
     places abroad), 'mixed' (both), or None (no evidence). 'Indianapolis' and 'Indiana' are not India."""
+    # the job's own location line sits at the top (title, then "Bangalore, India"); a form further down can list
+    # every US state in a dropdown (New Relic, 21 Oct 2026), which must not make an Indian job look "mixed"
+    head = (text or "")[:200]
+    if _INDIA.search(head) and not _ABROAD.search(head):
+        return "India"
     # legal footers name places that are not the job's ("California Supplemental Privacy Notice", "US Only" EEO
     # links: Infor, 18 Oct 2026)
     text = re.sub(r"california [\w ]{0,30}?(privacy|notice|statement|policy|act|rights|disclosure)[^\n]*|\(?\bus only\b\)?|"
@@ -148,6 +154,40 @@ def job_country_from(text: str, url: str = "") -> str | None:
     if india and abroad:
         return "mixed"
     return "India" if india else "other" if abroad else None
+
+
+def cover_letter_pdf(role: str, url: str, profile: dict, out_dir) -> "Path":
+    """A short, plain cover letter PDF for upload fields that ask for one. Facts only from the profile."""
+    from pathlib import Path
+    from urllib.parse import urlparse
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.lib.units import mm
+    from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
+    from xml.sax.saxutils import escape as esc
+    host = urlparse(url or "").netloc.replace("www.", "").split(".")[0] or "your team"
+    company = host.replace("-", " ").title()
+    role = (role or "the open role").strip()
+    name = profile.get("name", "")
+    st = ParagraphStyle("b", fontName="Helvetica", fontSize=10.5, leading=15)
+    paras = [
+        f"Dear Hiring Team at {company},",
+        f"I am applying for the {role} position. I am a Python Full Stack AI/ML Software Engineer with 2 years of "
+        "experience building production backends, REST APIs and LLM features with Python, FastAPI, React and Node.js.",
+        "Recently I built an enterprise RAG pipeline over 1,000+ documents at 85% retrieval accuracy, cut API latency "
+        "from 400 ms to under 150 ms for a platform serving 10,000+ users, and built ML inference pipelines with Redis "
+        "caching that removed 60% of repeated database queries.",
+        f"I can join immediately and would welcome the chance to discuss how I can contribute to {company}.",
+        f"Sincerely,<br/>{esc(name)}<br/>+91-{profile.get('phone_national', '')} | {profile.get('email', '')}",
+    ]
+    out = Path(out_dir) / f"{name.replace(' ', '_')}_Cover_Letter_{host}.pdf"
+    doc = SimpleDocTemplate(str(out), pagesize=A4, leftMargin=22 * mm, rightMargin=22 * mm, topMargin=25 * mm, bottomMargin=20 * mm,
+                            title=f"{name} - Cover Letter", author=name)
+    story = []
+    for t in paras:
+        story += [Paragraph(t if t.startswith("Sincerely") else esc(t), st), Spacer(1, 8)]
+    doc.build(story)
+    return out
 
 
 def _num(v) -> str:
@@ -206,6 +246,19 @@ class FormResult:
     status: str                       # ready_to_submit | applied | needs_you | no_form | failed
     notes: str = ""
     filled: list[dict] = field(default_factory=list)
+
+
+# Job-alert sign-ups, talent-community boxes, newsletters and job-search bars sit on the same page as the job
+# (Amgen / Barclays Radancy pages, 24-25 Oct 2026: the bot filled "Sign Up for Job Alerts" and skipped APPLY NOW)
+SIDE_WIDGET_JS = """e => { let n = e;
+  for (let i = 0; i < 7 && n; i++, n = n.parentElement) {
+    const body = n.innerText || '';
+    if (body.length > 1500) break;                     // past the widget: the page around it says nothing about this field
+    const t = ((n.getAttribute && (n.getAttribute('aria-label') || '')) + ' ' + body);
+    if (/job alerts?|talent (community|network)|sign ?up for (job )?alerts|newsletter|subscribe|search jobs|radius/i.test(t)) return true;
+    if (n.tagName === 'FORM') break;
+  }
+  return false; }"""
 
 
 class GenericFormApplier:
@@ -341,7 +394,8 @@ class GenericFormApplier:
         return bool(ACK_WORDING.search(l)) and not consent_only(l)
 
     def value_for(self, label: str) -> tuple[str | None, str]:
-        p, l = self.profile, label.lower()
+        # joined labels: "FullName*", "CompanyName*", "WorkEmail" (dotcom.co.in, 21 Oct 2026)
+        p, l = self.profile, re.sub(r"(?<=[a-z])(?=[A-Z])", " ", label).lower()
         links = p.get("links") or {}
         # signing an NDA (typing your name to agree) is a legal act: only for companies Ashu approved one by one
         if re.search(r"\bnda\b|non-?disclosure|confidentiality agreement", l):
@@ -359,14 +413,14 @@ class GenericFormApplier:
         table = [
             (r"\bfirst name|given name|^first\s*\*?$", p.get("first_name")), (r"\blast name|surname|family name|^last\s*\*?$", p.get("last_name")),
             (r"^(state|state ?/ ?province|province)\s*\*?$", p.get("state")),   # Ecom Solutions: "First", "Last", "State *" (13 Oct 2026)
-            (r"full name|^name\b(?! of)|your name|candidate name|^name\*?$", p.get("name")),
-            (r"e-?mail", p.get("email")), (r"phone|mobile|contact (no|number)|whatsapp", p.get("phone_national")),
+            (r"full name|legal name|^name\b(?! of)|your name|candidate name|^name\*?$", p.get("name")),
+            (r"e-?mail", p.get("email")), (r"phone|mobile|contact (no|number)|whatsapp|^your number\b|^number\s*\*?$", p.get("phone_national")),
             (r"resume (link|url)|cv (link|url)|link to (your )?(resume|cv)", links.get("resume")),   # a shared Drive link, when set
             (r"linkedin", links.get("linkedin")), (r"github", links.get("github")),
             (r"portfolio|website|personal (site|url)", links.get("portfolio") or links.get("github")),
             (r"\bcity\b|\btown\b|current location|location", p.get("location")), (r"postal|post ?code|pin ?code|zip", p.get("postal_code")),
             (r"address (line )?2|address line two|street address 2", p.get("address_line2")),
-            (r"address", p.get("address_line1")), (r"current (company|employer|organi[sz]ation)", p.get("current_company")),
+            (r"address", p.get("address_line1")), (r"current (company|employer|organi[sz]ation)|^company name\s*\*?$", p.get("current_company")),
             (r"current (title|designation|role|position)", p.get("current_title")),
             (r"^degree\b|degree name|qualif[a-z]*tion", p.get("degree")),
             (r"institut|school|university|college", p.get("school")),
@@ -406,6 +460,7 @@ class GenericFormApplier:
             (r"preferred (first )?name", p.get("first_name")),
             # "Job Applied for" / "Position Applying For" as a text box (Clavrit, Skillridge 15 Oct 2026): the posting's title
             (r"(job|position|role|post) (applied|applying) for|applying for (the )?(position|role|job|post)\b", self.role or None),
+            (r"^subject\s*\*?$", f"Application for {self.role}" if self.role else None),   # dotcom.co.in, 21 Oct 2026
             (r"^location( \(city\))?\b|^city\b|current city", p.get("city")),
             (r"enrolled in .{0,30}university in the past", "No"),
             (r"^school\b|school name|university", self._school_short()),
@@ -491,7 +546,8 @@ class GenericFormApplier:
             # a resume upload, or several visible fields next to a Submit button (Zoho uses plain text boxes for email)
             if pg.locator("input[type='file']").count():
                 return True
-            visible = [e for e in pg.locator("input[type='text'], input[type='email'], input[type='tel'], textarea").all() if e.is_visible()]
+            visible = [e for e in pg.locator("input[type='text'], input[type='email'], input[type='tel'], textarea").all()
+                       if e.is_visible() and not e.evaluate(SIDE_WIDGET_JS)]
             return len(visible) >= 3 and pg.get_by_text(re.compile(r"submit( application)?", re.I)).count() > 0
         if has_form():
             return True
@@ -507,7 +563,50 @@ class GenericFormApplier:
                     r"^\s*let'?s go\s*→?\s*$", r"^\s*get started\s*→?\s*$",
                     r"^\s*start( (my|your|the))?( application)?\s*→?\s*$",
                     r"^\s*begin( application)?\s*$", r"apply"):
+            els = []
             for el in pg.locator("a, button").all():
+                try:
+                    if el.is_visible() and re.search(pat, el.inner_text().strip(), re.I):
+                        href = (el.get_attribute("href") or "").strip()
+                        if href.lower().startswith("mailto:"):
+                            # an email-only "Apply": never click it (macOS opens Apple Mail); note the address so
+                            # the outreach step can email a tailored resume from Ashu's Gmail instead
+                            self.mailto = href[7:].split("?")[0]
+                            log.info("  Apply is an email link (%s): not clicked; noted for Gmail outreach", self.mailto)
+                            continue
+                        els.append(el)
+                except Exception:
+                    continue
+            # a link wrapping a button is ONE control (Infyni: <a><button>Apply Now</button></a>): keep the innermost
+            els = [el for el in els if not el.evaluate("e => !!e.querySelector('a, button')")] or els
+            if len(els) > 1:
+                # a listing page with one Apply button per job: take the button in THIS role's card, never the
+                # first one (InCruiter, 21 Oct 2026: "AI Full Stack Developer" went in as "Quality & Compliance")
+                words = [w for w in re.findall(r"[a-z]+", (self.role or "").lower()) if len(w) > 2 and w not in ("and", "the", "with")]
+                # the job card = the largest block around this button that holds no other Apply button (the nearest
+                # text block is often just the bullet list, without the title: Infyni, 21 Oct 2026)
+                card = """e => { const label = e.innerText.trim().toLowerCase();
+                           const count = n => [...n.querySelectorAll('a, button')].filter(x => x.innerText.trim().toLowerCase() === label
+                                                                                          && !x.querySelector('a, button')).length;
+                           let n = e; while (n.parentElement && count(n.parentElement) <= 1) n = n.parentElement;
+                           return (n.innerText || '').slice(0, 600); }"""
+                scored = []
+                for el in els:
+                    try:
+                        t = el.evaluate(card).lower()
+                    except Exception:
+                        t = ""
+                    head = next((x for x in t.splitlines() if x.strip()), "")       # the card's title line
+                    # a title word counts 10, a word elsewhere in the card 1 ("agentic" in an AI Security card's
+                    # bullets tied it with the Agentic AI Engineer card, Infyni 21 Oct 2026)
+                    scored.append((sum(10 if re.search(rf"\b{w}", head) else 1 if re.search(rf"\b{w}", t) else 0 for w in words), el))
+                best = max((s for s, _ in scored), default=0)
+                top = [el for s, el in scored if s == best]
+                if not words or best < 10 * max(1, (len(words) + 1) // 2) or len(top) > 1:
+                    log.info("  %d Apply buttons and none clearly for %r: leaving it to Ashu", len(els), self.role)
+                    return False
+                els = top
+            for el in els:
                 try:
                     if el.is_visible() and re.search(pat, el.inner_text().strip(), re.I):
                         href = el.get_attribute("href") or ""
@@ -583,6 +682,14 @@ class GenericFormApplier:
                     except Exception:
                         pass
                     time.sleep(3)
+            elif re.search(r"cover", lab):
+                # a cover-letter upload (TechAlly Labs, 22 Oct 2026): a one-page letter for this role, never the resume
+                try:
+                    cl = cover_letter_pdf(self.role, self.pg.url, self.profile, Path(self.resume).parent)
+                    f.set_input_files(str(cl)); self._note(lab, cl.name, "cover letter")
+                    time.sleep(2)
+                except Exception as e:
+                    log.warning("    cover letter not attached: %s", str(e)[:100])
         for el in pg.locator("input:not([type='hidden']):not([type='file']):not([type='submit']):not([type='button']), textarea, select").all():
             try:
                 if not el.is_visible() or el.get_attribute("aria-hidden") == "true":
@@ -591,6 +698,8 @@ class GenericFormApplier:
                 name = (el.get_attribute("name") or "").lower()
                 if re.search(r"gotcha|honeypot|newsletter|captcha|search", name) or typ == "search":
                     continue
+                if el.evaluate(SIDE_WIDGET_JS):
+                    continue                                  # job-alert / newsletter / search box, not the application
                 label = el.evaluate(LABEL_JS, timeout=5000)
                 if not label:
                     continue
@@ -670,7 +779,7 @@ class GenericFormApplier:
                 if val is None and re.search(r"cover[ _-]?letter|why (do you|are you|you.?re|you are|would you|did you|this role|us|join)|interested in (this|the) (role|job|position)|"
                                              r"anything else|like to join|want to join|\bnote\b|"
                                              r"motivation|about yourself|tell us about you\b|describe yourself|\bbio\b|message|"
-                                             r"additional information|summary|introduction|intro\b", hay, re.I):
+                                             r"additional information|summary|introduction|intro\b|your background\b", hay, re.I):
                     canned = rule_answer("Why should we hire you?", [], "text", self.profile)
                     val, src = (canned.answer_text, "canned") if canned else (None, "")
                 if val is None:
@@ -682,6 +791,12 @@ class GenericFormApplier:
                     val = rupees
                 elif typ == "textarea" or (typ == "text" and re.search(r"ctc|salary|notice|experience", label, re.I) and el.get_attribute("type") != "number"):
                     val = with_unit(label, val)
+                if el.get_attribute("type") == "number":
+                    # a number box takes digits only: "INR 7.5 LPA" -> "7.5" (Smallest.ai, 22 Oct 2026)
+                    m = re.search(r"\d+(?:\.\d+)?", str(val))
+                    if not m:
+                        self._unknown(label, []); continue
+                    val = m.group(0)
                 el.fill(val); self._note(label, val, src)
             except Exception as e:
                 log.warning("    field error: %s", str(e)[:100])
@@ -893,6 +1008,18 @@ class GenericFormApplier:
         if not options:
             return None
         l = label.lower()
+        # a US-state list with an "N/A" entry (New Relic, 21 Oct 2026): Ashu lives in India
+        if re.search(r"^\s*state\b", l) and any(re.fullmatch(r"\s*alabama\s*", o, re.I) for o in options) \
+                and str(self.profile.get("country") or "India").lower() != "united states":
+            hit = next((o for o in options if re.fullmatch(r"\s*(n/?a|not applicable|outside (the )?(us|u\.s\.|united states))\s*", o, re.I)), None)
+            if hit:
+                return hit
+        # experience level offered without a usable label ("Intern / Fresher / Experienced", Triosoft, 21 Oct 2026):
+        # Ashu has 2 years of work experience
+        if any(re.fullmatch(r"\s*fresher\s*", o, re.I) for o in options):
+            hit = next((o for o in options if re.match(r"\s*experienced\b", o, re.I)), None)
+            if hit:
+                return hit
         # college dropdowns: NSUT when listed, else the list's "Other" (Ashu, 6 Oct 2026)
         if re.search(r"(undergraduate|graduation|bachelor'?s?)? ?(institution|university|college)( name)?\b", l) and not re.search(r"year|gpa|cgpa|percent|degree|major", l):
             hit = next((o for o in options if re.search(r"netaji|nsut", o, re.I)), None) or \
@@ -972,13 +1099,25 @@ class GenericFormApplier:
         if re.search(r"(employee|contractor) (or contractor )?(at|of|with)\b", l) and re.search(r"currently|are you", l):
             return next((o for o in options if re.match(r"no\b", o, re.I)), None)
         if re.search(r"hispanic|latino|latinx", l) or re.search(r"identify as transgender|^transgender", l):
-            return next((o for o in options if re.match(r"no\b", o, re.I)), None)
+            # no "No" offered (Smartsheet, 29 Oct 2026: Yes / I don't wish to answer) -> decline
+            return next((o for o in options if re.match(r"no\b", o, re.I)), None) or \
+                   next((o for o in options if re.search(r"don.?t wish|prefer not|decline|not to (say|answer|disclose)", o, re.I)), None)
         if re.search(r"identify my gender|gender identity|^gender\b", l) and self.profile.get("gender"):
-            hit = next((o for o in options if re.fullmatch(r"(male|man)", o.strip(), re.I)), None)
+            hit = next((o for o in options if re.fullmatch(r"(male|man)", o.strip(), re.I)), None) or \
+                  next((o for o in options if re.match(r"(man|male)\b", o.strip(), re.I)), None)   # "Man, male or masculine" (Weave)
+            if not hit:   # no male option offered (Smartsheet, 29 Oct 2026: Female / Non-binary / I don't wish to answer)
+                hit = next((o for o in options if re.search(r"don.?t wish|prefer not|decline|not to (say|answer|disclose)", o, re.I)), None)
             if hit:
                 return hit
-        if re.search(r"race|ethnicity|veteran status", l):
-            return next((o for o in options if re.search(r"decline|prefer not|do not wish|don.t wish", o, re.I)), None)
+        if re.search(r"disabilit", l) and self.profile.get("disability") is False:
+            # voluntary self-identification; profile.disability is Ashu's confirmed answer (Weave, 24 Oct 2026)
+            return next((o for o in options if re.match(r"no\b|i do not have|i don.t have a disab", o.strip(), re.I)), None)
+        if re.search(r"veteran", l):        # "No, I am not a veteran" (Smartsheet, 29 Oct 2026); profile: not a veteran
+            return next((o for o in options if re.search(r"not a (protected )?veteran|^no\b|i am not", o, re.I)), None) or \
+                   next((o for o in options if re.search(r"decline|prefer not|do not wish|don.t wish", o, re.I)), None)
+        if re.search(r"race|ethnicity", l):  # South Asian / Indian when listed, else decline
+            return next((o for o in options if re.search(r"south asian|\bindian\b(?!.*(american|alaska|native))", o, re.I)), None) or \
+                   next((o for o in options if re.search(r"decline|prefer not|do not wish|don.t wish", o, re.I)), None)
         if re.search(r"^(sms|whatsapp)$|text messages|whatsapp messages", l):
             return next((o for o in options if re.match(r"yes\b", o, re.I)), None)      # Ashu: opt in to SMS contact
         if re.search(r"familiar(ity)? with (artificial intelligence|ai)|rate .{0,30}(ai|artificial intelligence)", l):
@@ -1000,7 +1139,9 @@ class GenericFormApplier:
         if re.search(r"gender", l) and self.profile.get("gender"):
             return next((o for o in options if o.lower() == self.profile["gender"].lower()), None)
         if re.search(r"country", l):
-            return next((o for o in options if o.lower() == "india"), None)
+            # "India +91" in phone-code lists, never "British Indian Ocean Territory +246" (Greenhouse, 22 Oct 2026)
+            return next((o for o in options if o.lower() == "india"), None) or \
+                   next((o for o in options if re.match(r"\s*india\b(?!n)", o, re.I)), None)
         if re.search(r"experience|years", l):
             yrs = float(self.profile.get("total_experience_years") or 0)
             for o in options:
@@ -1198,6 +1339,24 @@ class GenericFormApplier:
         from ..ask_ashu import record
         record(label, options, "company-form", getattr(self, 'role', ''))
 
+    def ensure_resume(self) -> int:
+        """Attach the tailored resume again to every empty resume field. Called before a tab is left for Ashu:
+        a rejected submit (Lever, Turgon AI) or a re-render clears the file, and he could not apply without it
+        (Triosoft, 21 Oct 2026). Returns how many fields were re-attached."""
+        n = 0
+        for f in self.pg.locator("input[type='file']").all():
+            try:
+                lab = f.evaluate(LABEL_JS, timeout=5000).lower()
+                if re.search(r"cover|photo|image|picture|avatar", lab) and not re.search(r"resume|cv", lab):
+                    continue
+                if f.evaluate("e => e.files ? e.files.length : 0") == 0:
+                    f.set_input_files(self.resume); time.sleep(2); n += 1
+            except Exception as e:
+                log.warning("    resume re-attach failed: %s", str(e)[:100])
+        if n:
+            log.info("    resume re-attached to %d empty field(s)", n)
+        return n
+
     def run(self, url: str) -> FormResult:
         try:
             return self._run(url)
@@ -1225,6 +1384,11 @@ class GenericFormApplier:
                 return False
         forms = pg.locator("form").filter(has=pg.locator("input[type='file'], input[type='email'], input[name*='mail' i]"))
         for k in range(forms.count()):
+            try:
+                if forms.nth(k).evaluate(SIDE_WIDGET_JS):
+                    continue                                  # never "submit" a job-alert sign-up
+            except Exception:
+                pass
             cands = [b for b in forms.nth(k).locator("button[type='submit'], input[type='submit'], "
                                                      "button:not([type='button']):not([type='reset'])").all() if vis(b)]
             aria = lambda b: (b.get_attribute("aria-label") or b.get_attribute("title") or "")   # noqa: E731

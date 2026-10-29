@@ -146,22 +146,74 @@ def tailored_pdf(jd_text: str, title: str, company: str, playwright=None, url: s
     if plan:
         report["dropped"] = apply_plan(r, json.loads(plan.read_text()), data, corpus)
         report["plan"] = plan.name
-    cov = ats_report(resume_text(r), jd_text)                 # keyword coverage against the JD itself
-    # ATS target 90+ (Ashu, 18 Oct 2026): add the JD's missing keywords that are TRUE for Ashu (they pass the
-    # grounding check against his resume, profile and confirmed skills) to the skills section. Keywords he does
-    # not have stay missing: the score is reported as it is, never padded with false skills.
-    if cov["score"] < 90 and cov["missing"]:
-        from .grounding import check_text
-        from .llm import SkillGroup
-        # positively present in the facts (resume, profile skills, confirmed skills) AND not flagged: an unknown tool
-        # ("SnapLogic") passes check_text but is not in the corpus, so it is never added
-        add = [k for k in cov["missing"] if corpus.has_phrase(k) and not check_text(k, "skills", corpus)]
+    # the job title is the first thing an ATS matches: lead the headline with it when the resume does not say it
+    clean_title = re.sub(r"\s+-\s+\d+\s*$", "", title or "").strip()      # "AI/ML Engineer - 02" -> "AI/ML Engineer"
+    if clean_title and not re.search(re.escape(clean_title), r.headline or "", re.I):
+        r.headline = f"{clean_title} | {r.headline}"
+    from .grounding import check_text
+    from .llm import SkillGroup
+
+    def grounded(k: str) -> bool:
+        # Ashu, 18 Oct 2026: only keywords that are TRUE for Ashu may be added. Positively present in the facts
+        # (resume, profile skills, confirmed skills) AND not flagged: an unknown tool ("SnapLogic") passes
+        # check_text but is not in the corpus, so it is never added. Keywords he does not have stay missing and
+        # the score is reported as it is, never padded with false skills.
+        return corpus.has_phrase(k) and not check_text(k, "skills", corpus)
+
+    # match score (naukri_bot/ats_bimetric.py: skills, job title, experience, education, domain, certifications)
+    # must reach ats_target (Ashu: 95, part of the protocol since 9 Oct 2026). Tailoring can only raise skills and
+    # the title; years, degree and certificates are facts and are reported, not changed.
+    from .ats_bimetric import bimetric, summary
+    profile = load_profile()
+    target = int(profile.get("ats_target") or 0)
+    res = bimetric(r, jd_text, title, skills, profile)
+    first = summary(res)
+    if target and res["score"] < target:
+        # clean JD phrases before they reach the resume (TCS, 26 Oct 2026: "including microservices", "rag pipelines")
+        acr = {"rag": "RAG", "llm": "LLM", "llms": "LLMs", "api": "API", "apis": "APIs", "sdk": "SDK", "sdks": "SDKs",
+               "aws": "AWS", "eks": "EKS", "ml": "ML", "ai": "AI", "nlp": "NLP", "sql": "SQL", "iac": "IaC", "ci/cd": "CI/CD"}
+        def tidy(t: str) -> str:
+            t = re.sub(r"^(including|and|with|or|such as|like|strong|good|hands-on)\s+", "", t.strip(), flags=re.I)
+            words = [acr.get(w.lower(), w) for w in t.split()]
+            if words and words[0] == words[0].lower():
+                words[0] = words[0][:1].upper() + words[0][1:]
+            return " ".join(words)
+        def clean(items):
+            out, seen = [], set()
+            for t in items:
+                c = tidy(t)
+                if re.search(r"\byears?\b|\d|\.\s|\b(be|btech|b\.tech|degree|engineering)\b|^cd\b", c, re.I):
+                    continue                      # a sentence fragment from the JD ("Years. be engineering"), not a skill
+                if c and c.lower() not in seen:
+                    seen.add(c.lower()); out.append(c)
+            return out
+        candidates = clean(res["categories"].get("skills", {}).get("missing", []))
+        # merge note (29 Oct 2026): the other machine's branch added every missing JD skill; the grounded-only rule
+        # stays - skills Ashu does not have are reported (ats_ungrounded), not written into the resume
+        missing = [k for k in candidates if grounded(k)]
+        list_only = clean(res["categories"].get("skills", {}).get("skills_list_only", []))
+        if missing:
+            r.skills = list(r.skills) + [SkillGroup(name="Also worked with", items=list(missing))]
+        if missing or list_only:          # the summary counts as experience for the engines: name the toolkit there
+            r.summary = (r.summary or "").rstrip() + " Toolkit: " + ", ".join(dict.fromkeys(missing + list_only)) + "."
+        report["added_for_ats"] = report["ats_added"] = list(missing)
+        report["ats_ungrounded"] = [k for k in candidates if k not in missing]
+        res = bimetric(r, jd_text, title, skills, profile)
+        log.info("  ATS match %s -> %s%s", first, summary(res), "" if res["score"] >= target else
+                 f"  (below {target}: limited by facts it cannot change)")
+    else:
+        log.info("  ATS match %s", first)
+    cov = ats_report(resume_text(r), jd_text, skills)           # plain keyword coverage, kept for reference
+    # no ats_target set: the plain keyword-coverage pass (target 90) with the same grounded-only rule
+    if not target and cov["score"] < 90 and cov["missing"]:
+        add = [k for k in cov["missing"] if grounded(k)]
         if add:
             r.skills = list(r.skills) + [SkillGroup(name="Also used", items=add)]
-            cov = ats_report(resume_text(r), jd_text)
+            cov = ats_report(resume_text(r), jd_text, skills)
+            res = bimetric(r, jd_text, title, skills, profile)
             report["ats_added"] = add
-    report["ats"], report["ats_hit"], report["ats_missing"] = cov["score"], cov["matched"], cov["missing"]
-    report["coverage"] = cov
+    report["ats"], report["ats_hit"], report["ats_missing"] = res["score"], cov["matched"], cov["missing"]
+    report["bimetric"], report["coverage"] = res, cov
     out = OUTPUT_DIR / "resumes" / "tailored"
     out.mkdir(parents=True, exist_ok=True)
     # recruiters see the file name: keep it clean

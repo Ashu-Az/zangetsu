@@ -193,6 +193,26 @@ def _profile_fact(q: str, options: list[str], profile: dict, question_raw: str =
             re.search(r"(\d+(?:\.\d+)?)\s*(?:\+|plus)", q) or re.search(r"(\d+(?:\.\d+)?)\s*(?:[-–]|to)\s*\d+\s*(?:years|yrs)", q)
         if m and float(m.group(1)) <= float(cap) and (not has_opts or _yes_no(options, True) is not None):
             return yn(True)
+    # "Who is your current or previous employer?" (Stripe, 29 Oct 2026): Quess stays the current employer
+    if not has_opts and re.search(r"(who|what|name of) (is |was )?your (current|present|most recent|previous|last)( or (previous|past|last))? (employer|company|organi[sz]ation)", q):
+        if profile.get("current_company"):
+            return _answer(str(profile["current_company"]))
+    # "Where are you located?" with location choices (Ema, 29 Oct 2026: US Remote / Mountain View / India Remote / Bengaluru):
+    # Delhi/NCR if offered, else India remote, else any India option
+    if has_opts and re.search(r"where are you (currently )?(located|based)|your (current )?location\??$", q):
+        i = next((k for k, o in enumerate(options) if re.search(r"delhi|ncr|gurgaon|gurugram|noida", o, re.I)), None)
+        if i is None:
+            i = next((k for k, o in enumerate(options) if re.search(r"india", o, re.I) and re.search(r"remote", o, re.I)), None)
+        if i is None:
+            i = next((k for k, o in enumerate(options) if re.search(r"india", o, re.I)), None)
+        if i is not None:
+            return _answer("", i, options)
+    # "Your background in a few lines: experience, certifications, the numbers you have owned" (ASPR RCM, 26 Oct 2026)
+    if not has_opts and re.search(r"(your )?background in (a few|few|\d+) (lines|sentences)|numbers you (have )?owned|"
+                                  r"(summari[sz]e|describe) your (background|profile|experience) (briefly|in (a few|few) )", q):
+        summary = str(profile.get("background_summary") or "").strip()     # kept in the private profile, not in code
+        if summary:
+            return _answer(summary)
     # "Which IIT did you graduate from?" -> his real college (Ashu, 15 Oct 2026: "just say nsut")
     if re.search(r"which (iit|nit|iiit)s?\b|name of (your|the) (iit|nit|iiit)\b|(iit|nit|iiit) (name|college|attended)", q):
         if has_opts:
@@ -223,11 +243,31 @@ def _profile_fact(q: str, options: list[str], profile: dict, question_raw: str =
             return _answer("", i, options) if i is not None else None
         if re.match(r"^(are|is|do|can) you", q):
             return _answer("Yes")
+    # "Can you speak Telugu?" / "Do you know Kannada?": Yes only for a language in the profile (Cyepro, 21 Oct 2026)
+    m = re.search(r"\b(speak|read|write|know|fluent in|proficient in|comfortable (in|with))\s+(telugu|tamil|kannada|malayalam|marathi|bengali|"
+                  r"gujarati|punjabi|odia|oriya|urdu|hindi|english|french|german|spanish|japanese|mandarin|arabic)\b", q)
+    if m:
+        known = {str(x).lower() for x in profile.get("languages") or []}
+        yes = m.group(3) in known
+        if has_opts:
+            i = _yes_no(options, yes)
+            return _answer("", i, options) if i is not None else None
+        return _answer("Yes" if yes else "No")
+    # "Are you currently working at New Relic?": employed BY THE NAMED COMPANY, not employed in general (New Relic
+    # was answered Yes, 21 Oct 2026). Yes only when the named company is Ashu's current employer.
+    m = re.search(r"^are you (currently |now )?(employed|working) (at|for|with|by|in) (?!(a|an|the|any|this|your)\b)([a-z0-9 .&'-]+?)\s*\??$", q)
+    if has_opts and m:
+        cur = str(profile.get("current_company") or "").lower()
+        named = m.group(5).strip()
+        mine = bool(cur) and (named in cur or cur.split()[0] in named)
+        i = _yes_no(options, mine)
+        return _answer("", i, options) if i is not None else None
     # employment status: employed, serving notice
     # about Ashu only: "Are any of your relatives currently employed by X?" is a conflict question (S&P Global answered
     # Yes through this rule, 13 Oct 2026)
     if has_opts and (re.search(r"\byour (current )?employment status|^(what is )?(current )?employment status|^are you (currently )?(employed|working)\b", q)
-                     and not re.search(r"relati|family|friend|spouse|partner|blood|kin\b|anyone|someone|person", q)):
+                     and not re.search(r"relati|family|friend|spouse|partner|blood|kin\b|anyone|someone|person", q)
+                     and not re.search(r"^are you (currently |now )?(employed|working) (at|for|with|by|in)\b", q)):
         if profile.get("serving_notice"):
             i = _opt(options, r"serving notice", r"currently employed", r"^employed", r"^yes")
         else:
@@ -257,6 +297,11 @@ def _profile_fact(q: str, options: list[str], profile: dict, question_raw: str =
         if i is None and profile.get("sexual_orientation"):
             i = _opt(options, r"^hetero", r"\bstraight\b", r"heterosexual")
         return _answer("", i, options) if i is not None else None
+    # "How do you currently describe your gender identity?" (Weave/Ashby, 24 Oct 2026): Man, never a transgender option
+    if has_opts and re.search(r"gender( identity)?\b", q) and str(profile.get("gender", "")).lower() == "male":
+        i = _opt(options, r"^(?!.*trans)(man|male)\b", r"^(?!.*(trans|wo|fe)).*\b(man|male)\b")
+        if i is not None:
+            return _answer("", i, options)
     if has_opts and re.search(r"\btransgender\b", q) and "transgender" in profile:
         i = _yes_no(options, bool(profile["transgender"])); return _answer("", i, options) if i is not None else None
     if has_opts and re.search(r"hispanic|latin[oa]|latinx", q) and re.match(r"^(are|is) you|^hispanic|^ethnicity", q) and "hispanic_latino" in profile:
@@ -323,13 +368,45 @@ def _profile_fact(q: str, options: list[str], profile: dict, question_raw: str =
                                      r"where did you (hear|find|see) (about )?(us|this (job|role|opening))|source( of application)?|"
                                      r"how did you (come across|cross paths with|find|discover) (us|this (job|role|position|opening)))\??", q):
         return _answer("Naukri.com")
-    # the same question as a dropdown without Naukri (MyNextDeveloper: LinkedIn / Referral / Social Media / Job Board):
-    # Naukri is a job board
+    # the same question as a dropdown (MyNextDeveloper: LinkedIn / Referral / Social Media / Job Board; LinkedIn Easy
+    # Apply, Brivo 22 Oct 2026): Naukri, else LinkedIn, else a job board / online, else Other
     if has_opts and re.search(r"how did you (hear|learn|find out|come across|cross paths with|find|discover)|where did you (hear|find|see)|"
-                              r"^source( of application)?\??$", q):
-        i = _opt(options, r"naukri", r"job (board|portal|site|website)s?", r"^online job", r"^other( job board| website)?s?$")
+                              r"^source( of application)?\b", q):
+        i = _opt(options, r"naukri", r"linked ?in", r"job ?(board|portal|site|website)s?|online", r"^\s*others?\b|^other( job board| website)?s?$")
         if i is not None:
             return _answer("", i, options)
+    # ---- LinkedIn screening questions, 22 Oct 2026
+    # "Did you graduate from an IIT, BITS, NIT or T1 equivalent with a CGPA of 8.0/10 or above?": NSUT, CGPA 7.22 -> No
+    m = re.search(r"cgpa (of )?(\d+(?:\.\d+)?)", q)
+    if m and re.search(r"\biit|\bnit\b|bits|tier ?1|\bt1\b", q):
+        cg = _num(profile.get("cgpa")) or 7.22
+        i = _yes_no(options, cg >= float(m.group(2)))
+        return _answer("", i, options) if has_opts and i is not None else _answer("Yes" if cg >= float(m.group(2)) else "No")
+    # "How would you rate your Data Structures & Algorithms skills on a scale of 1-10?"
+    if re.search(r"rate (your )?.{0,60}(scale of|out of) ?(1\s*(-|–|to)?\s*)?10", q):
+        if has_opts:
+            i = _opt(options, r"^\s*8\b", r"^\s*7\b")
+            return _answer("", i, options) if i is not None else None
+        return _answer("8")
+    # "Did you graduate in 2022/2023/2024/2025?" (techolution): Yes when the graduation year is in the list
+    yrs = re.findall(r"\b(20\d\d)\b", q)
+    if len(yrs) >= 2 and re.search(r"graduat|pass(ed)? out|batch", q):
+        gy = str(profile.get("graduation_year") or 2024)
+        i = _yes_no(options, gy in yrs)
+        return _answer("", i, options) if has_opts and i is not None else _answer("Yes" if gy in yrs else "No")
+    # "Are you interested to work with a Growth Stage AI Startup...?" / "Can you spot ... a SQL query that ...?": Yes
+    if re.search(r"(interested|open|willing) to work (with|for|at|in) (a |an )?(growth[- ]stage |early[- ]stage )?(ai )?startup|"
+                 r"^can you (spot|identify|find|debug|explain|read)\b", q):
+        i = _yes_no(options, True)
+        return _answer("", i, options) if has_opts and i is not None else _answer("Yes")
+    # "What role / roles are you applying for?" (free text): never "Junior ..." (the model wrote that, 23 Oct 2026)
+    if not has_opts and re.search(r"what (role|roles|position|positions)( / roles?)? (are )?you (are )?applying for|"
+                                  r"(role|position)s? (you are )?applying for\??$", q):
+        return _answer("AI/ML Engineer / GenAI Engineer (Python)")
+    # PhD: Ashu has a B.Tech
+    if re.search(r"\bph\.?d\b|doctorate", q) and re.search(r"are you|have you|do you|completed|completing|pursuing", q):
+        i = _yes_no(options, False)
+        return _answer("", i, options) if has_opts and i is not None else _answer("No")
     # ---- inbox questions, 16 Oct 2026
     # "Date Available" / earliest start date: the day after the last working day (immediate joiner)
     if not has_opts and re.fullmatch(r"(date available|available (from|date)|earliest (possible )?start date|start date|"
@@ -343,7 +420,9 @@ def _profile_fact(q: str, options: list[str], profile: dict, question_raw: str =
         if i is not None:
             return _answer("", i, options)
     # "Desired Pay" / desired salary: the expected CTC
-    if re.search(r"desired (pay|salary|compensation|ctc)|salary expectation", q) and profile.get("expected_ctc_lpa") and not has_opts:
+    if re.search(r"desired (annual )?(pay|salary|compensation|ctc|remuneration)|salary expectation", q) and profile.get("expected_ctc_lpa") and not has_opts:
+        if re.search(r"\binr\b|rupees|₹|in numbers|per annum", q) and not re.search(r"lakh|lpa", q):
+            return _answer(str(int(_num(profile["expected_ctc_lpa"]) * 100000)))   # "in INR": the full amount (Guidepoint, 26 Oct 2026)
         return _answer(_fmt(_num(profile["expected_ctc_lpa"])))   # forms add the unit (with_unit) where the box is free text
     # "Which IIT did you graduate from?": none - NSUT
     if re.search(r"which (iit|nit|iiit)\b", q) and not has_opts:
@@ -432,7 +511,7 @@ def rule_answer(question: str, options: list[str], kind: str, profile: dict) -> 
         return hit
 
     # date of birth: from profile.date_of_birth (YYYY-MM-DD), in the DD/MM/YYYY form Indian forms expect
-    if re.fullmatch(r"(your )?(date of birth|dob|birth ?date)( \(dd/mm/yyyy\))?", q) and profile.get("date_of_birth") and not has_opts:
+    if re.fullmatch(r"(what is |please (enter|share|mention) )?(your )?(date of birth|dob|birth ?date)( \(dd/mm/yyyy\))?\??", q) and profile.get("date_of_birth") and not has_opts:
         y, m, d = str(profile["date_of_birth"]).split("-")
         return _answer(f"{d}/{m}/{y}")
 
@@ -563,7 +642,7 @@ def rule_answer(question: str, options: list[str], kind: str, profile: dict) -> 
     # ...except that "have you entered into / are you bound by a non-compete?" is a fact the profile records
     # (restrictive_covenant); only "would you sign one?" is the person's call.
     existing_covenant = re.search(r"non-?compete|restrictive covenant", q) and \
-        re.search(r"have you (ever )?(entered|signed|agreed)|are you (currently )?(bound|subject|party)|do you have (any )?(existing|current)", q)
+        re.search(r"have you (ever )?(entered|signed|agreed)|are you (currently |presently |now )?(bound|subject|party)|do you have (any |an )?(existing|current|employment agreement|restrictions?)", q)
     if SENSITIVE.search(q) and not (existing_covenant and "restrictive_covenant" in profile):
         return None
 
@@ -596,7 +675,7 @@ def rule_answer(question: str, options: list[str], kind: str, profile: dict) -> 
         return _answer("Yes")
 
     # ---- consent to recruiters contacting the candidate by SMS / WhatsApp / text about the application -> yes (more calls)
-    if re.search(r"(reach out|contact|message|text|notify) (to )?(me|you).{0,30}\b(sms|text messages?|whatsapp)\b|\b(sms|whatsapp|text message)s?\b.{0,40}(consent|agree|opt[- ]?in)", q):
+    if re.search(r"(reach out|contact|message|text|notify) (to )?(me|you).{0,30}\b(sms|text messages?|whatsapp)\b|\b(sms|whatsapp|text message)s?\b.{0,40}(consent|agree|opt[- ]?in)|(agree\w*|consent) to receive (sms|whatsapp|text)", q):
         if has_opts:
             i = next((k for k, o in enumerate(options) if re.match(r"\s*(yes|i agree|agree|opt[- ]?in|i consent)", o, re.I)), None)
             return _answer("", i, options) if i is not None else None
@@ -615,6 +694,13 @@ def rule_answer(question: str, options: list[str], kind: str, profile: dict) -> 
             and not re.search(r"night|rotational|shift", q):
         if has_opts:
             i = next((k for k, o in enumerate(options) if re.match(r"\s*(yes|ok|okay|sure|i am (fine|ok|comfortable)|agree|comfortable|interested|fine)", o, re.I)), None)
+            return _answer("", i, options) if i is not None else None
+        return _answer("Yes, I'm okay with working from the office and willing to relocate")
+    # a bare label: "Work from office (Marathahalli, Bangalore )" (Emergent Labs, 20 Oct 2026), "WFO - Gurgaon"
+    if profile.get("willing_to_relocate") and re.fullmatch(r"\s*(work from office|wfo|on-?site)\b[^?]*", q) \
+            and not re.search(r"night|rotational|shift|days? (a|per) week|how many", q):
+        if has_opts:
+            i = _yes_no(options, True)
             return _answer("", i, options) if i is not None else None
         return _answer("Yes, I'm okay with working from the office and willing to relocate")
 
@@ -640,7 +726,7 @@ def rule_answer(question: str, options: list[str], kind: str, profile: dict) -> 
     # ---- military / armed-forces service (profile.veteran is False)
     if profile.get("veteran") is False and re.search(r"(served|serve|service) in (the )?(military|armed forces|army|navy|air force|defen[cs]e)|\bex-?servicem[ae]n\b|\bveteran\b", q):
         if has_opts:
-            i = next((k for k, o in enumerate(options) if re.match(r"\s*(no|n)\b|\s*i am not|not a (protected )?veteran", o, re.I)), None)
+            i = next((k for k, o in enumerate(options) if re.match(r"\s*(no|n|never)\b|\s*i (am not|have not|haven.t)|not a (protected )?veteran", o, re.I)), None)
             return _answer("", i, options) if i is not None else None
         return _answer("No")
 
@@ -731,7 +817,7 @@ def rule_answer(question: str, options: list[str], kind: str, profile: dict) -> 
         return _answer("No")
 
     # ---- one free-text box asking for several facts: "current CTC & notice period", "expected CTC and NP"
-    asks_ctc = bool(re.search(r"\b(ctc|salary|compensation|package)\b", q))
+    asks_ctc = bool(re.search(r"\b(ctc|salary|compensation|package|remuneration)\b", q))
     if not has_opts and asks_ctc and "notice" in q:
         parts = []
         if "current" in q or "present" in q or not ("expect" in q):
@@ -762,6 +848,17 @@ def rule_answer(question: str, options: list[str], kind: str, profile: dict) -> 
             i = next((k for k, o in enumerate(options) if re.search(r"not (needed|required|applicable)|n/?a|^no\b", o, re.I)), None)
             return _answer("", i, options) if i is not None else None
         return _answer(f"Not needed - my last working day is {profile['last_working_day']}")
+
+    # ---- "Have you worked with exlservice.com (I) Pvt. Ltd. or any associate company before? If yes, Employee ID"
+    # (EXL, 24 Oct 2026, answered "Yes." by the skill rule below): a question about the employer, never a skill
+    if re.search(r"(worked|employed|associated) (with|for|at|in)\b", q) and \
+            re.search(r"\b(pvt|ltd|limited|inc|llp|\.com|company|companies|subsidiar\w*|associate company|group company|"
+                      r"organi[sz]ation|employee (id|code|number))\b", q) and \
+            not re.search(r"quess|headsup|rova|botter|verzeo|startup|product company|service company|mnc", q):
+        if has_opts:
+            i = next((k for k, o in enumerate(options) if re.match(r"\s*no\b", o, re.I)), None)
+            return _answer("", i, options) if i is not None else None
+        return _answer("No")
 
     # ---- free-text yes/no about skills/experience ("Do you have hands-on experience with X? If yes, describe",
     # "Must have exp in Python, AWS, LangChain"). A number here reads as nonsense to a recruiter.
@@ -814,14 +911,52 @@ def rule_answer(question: str, options: list[str], kind: str, profile: dict) -> 
             i = _yes_no(options, hit); return _answer("", i, options) if i is not None else None
         return _answer("Yes" if hit else "No")
 
+    # ---- talent-pool preference (HP, 23 Oct 2026): be considered for future roles in India, else any future roles
+    if has_opts and any(re.search(r"future recruitment|future (roles|positions|opportunities)", o, re.I) for o in options):
+        i = next((k for k, o in enumerate(options) if re.search(r"future.*my country|within my country", o, re.I)), None)
+        if i is None:
+            i = next((k for k, o in enumerate(options) if re.search(r"(contact|consider) me for (all )?future", o, re.I)), None)
+        if i is not None:
+            return _answer("", i, options)
+
     # ---- bankruptcy / financial delinquency / litigation (confirmed none)
     if (profile.get("no_legal_issues") and re.search(r"bankrupt|financial delinquen|litigation|insolven", q)) or \
        (profile.get("no_criminal_record") and re.search(r"criminal|convicted|conviction|offen[cs]e", q)) or \
+       (profile.get("no_legal_issues") and re.search(r"disciplinary|regulatory action|legal proceedings|"
+                                                     r"(investigat|disciplined|cautioned).{0,30}regulat", q)) or \
+       re.search(r"(hold|plan to register).{0,40}(securities|finra|series \d)|securities (licen[cs]e|registration)", q) or \
        (profile.get("no_terminations") and re.search(r"(suspended|terminated|dismissed|fired|let go)", q)
             and re.search(r"employ|job|service|position|work", q)):
         if has_opts:
             i = next((k for k, o in enumerate(options) if re.match(r"\s*no\b", o, re.I)), None)
             return _answer("", i, options) if i is not None else None
+        return _answer("No")
+
+    # ---- Workday application questions from 28 Oct 2026 (Barclays, ABC Financial, HP)
+    # "Do you currently reside within India?" - Ashu lives in Delhi
+    if re.search(r"(reside|live|living|based|located) (with)?in india\b", q) and not re.search(r"outside", q):
+        if has_opts:
+            i = _yes_no(options, True); return _answer("", i, options) if i is not None else None
+        return _answer("Yes")
+    # "Have you been employed within the last 24 months by ... KPMG?" - only Quess, HeadsUp, ROVA, Verzeo
+    if re.search(r"employed (with)?in the (last|past) \d+ (months|years) by", q) and \
+            not re.search(r"quess|headsup|rova|botter|verzeo", q):
+        if has_opts:
+            i = _yes_no(options, False); return _answer("", i, options) if i is not None else None
+        return _answer("No")
+    # "This is a hybrid role ... do you have any concerns with this work arrangement?" - open to hybrid/office
+    if re.search(r"(any )?concerns? (with|about) (this|the) (work )?(arrangement|hybrid|office|location)", q):
+        if has_opts:
+            i = _yes_no(options, False); return _answer("", i, options) if i is not None else None
+        return _answer("No")
+    # "What is the soonest you would be able to start?" - immediate joiner (last day at Quess 20 Oct 2026)
+    if re.search(r"soonest .{0,30}(start|join)", q):
+        return _answer("Immediately")
+    # "Is your right to work based (now or in future) on a visa / sponsorship?" - Indian citizen working in India
+    if re.search(r"right to work (is )?based .{0,40}(visa|sponsor|permit)|right to work based", q) and \
+            not re.search(r"\b(united states|usa|uk|united kingdom|canada|europe|singapore|australia)\b", q):
+        if has_opts:
+            i = _yes_no(options, False); return _answer("", i, options) if i is not None else None
         return _answer("No")
 
     # ---- "are you based out of <city>?" -> truthful for Delhi/NCR; elsewhere No + relocation note
@@ -842,6 +977,18 @@ def rule_answer(question: str, options: list[str], kind: str, profile: dict) -> 
     if re.search(r"prior .{0,25}employment (end|start) date|date (you )?(left|leaving) .{0,20}(company|employment)|"
                  r"if (you )?(previously|formerly) (worked|employed)", q) and not has_opts:
         return _answer("N/A - never employed there")
+    # "Have you ever been issued a Cisco Employee ID or Cisco email address?" (24 Oct 2026): never worked there
+    if has_opts and re.search(r"(ever )?been issued .{0,30}(employee id|email address|badge)", q) and \
+            not re.search(r"quess|headsup|rova|botter|verzeo", q):
+        i = next((k for k, o in enumerate(options) if re.match(r"\s*no\b", o, re.I)), None)
+        if i is not None:
+            return _answer("", i, options)
+    # "Are you currently or have you previously been directly employed, accepted an offer, or contracted with Intel?" (24 Oct 2026)
+    if has_opts and re.search(r"(previously|ever) (been )?(directly )?(employed|worked|contracted).{0,60}\b(with|at|by|for)\b", q) and \
+            not re.search(r"quess|headsup|rova|botter|verzeo|govern|military|armed", q):
+        i = next((k for k, o in enumerate(options) if re.match(r"\s*no\b", o, re.I)), None)
+        if i is not None:
+            return _answer("", i, options)
 
     # ---- "are you serving notice?" (yes/no)
     if re.search(r"(are you|currently) (currently )?serving (your |the )?notice|serving notice period\??$", q) and \
@@ -921,7 +1068,14 @@ def rule_answer(question: str, options: list[str], kind: str, profile: dict) -> 
                 return _answer("", _yes_no(options, lo <= total <= hi or (total >= lo and hi == float("inf"))), options)
         total_markers = ("total", "overall", "work experience", "relevant experience", "years of experience do you have?", "professional experience",
                          "experience in years", "experience (years)", "experience (in years)", "years of experience")
-        m = re.search(r"experience (?:do you have |have you )?(?:in|with|on|of|using|working (?:in|with|on))\s+(.+?)(?:\?|$)", q) or \
+        # "Which cloud platform do you have experience with, AWS, Azure or both?" / "Which front-end technologies ... and how
+        # many years with each?" ask for names, not a number (Wissen, 24 Oct 2026 got "3"): the model answers those
+        if re.match(r"^\W*(which|what)\b(?! is your (total|overall|relevant))", q) and \
+                re.search(r"technolog|platform|tools?\b|languages?|framework|librar|databases?|cloud|stack|domains?|industr|models?\b|vector", q):
+            return None
+        m = re.search(r"(?:years|yrs) of (?:experience|exp)\s+(?:in |with |of )?(?:building|developing|creating|deploying|launching|"
+                      r"designing|shipping|working on|implementing)\s+(.+?)(?:\?|$)", q) or \
+            re.search(r"experience (?:do you have |have you )?(?:in|with|on|of|using|working (?:in|with|on))\s+(.+?)(?:\?|$)", q) or \
             re.search(r"(?:years|yrs)(?: of)? (?:experience )?(?:in|with|on|using)\s+(.+?)(?:\?|$)", q) or \
             re.search(r"(?:years|yrs) of (?:hands-on |professional |relevant |practical )?(.+?) (?:experience|exp)\b", q)
         if m and re.fullmatch(r"\s*(years?|yrs?|months?)\b.*", m.group(1)):
@@ -946,13 +1100,16 @@ def rule_answer(question: str, options: list[str], kind: str, profile: dict) -> 
                 return None
             if not yrs:      # a named skill Ashu does not list
                 yrs = float(profile.get("default_skill_years") or 1) if assume else 0.0
+            elif assume:     # Ashu 21 Oct 2026: "everything is 2" - listed skills below that (RAG 1.5, Redis 1) too
+                yrs = max(yrs, float(profile.get("default_skill_years") or 0))
             return numeric(yrs)
         if any(k in q for k in total_markers) or re.search(r"experience\??$", q):
             return numeric(_num(profile.get("total_experience_years")))
         return None
 
     # ---- relocation / location
-    if "relocat" in q:
+    if "relocat" in q or (kind == "checkbox" and re.search(r"(which|select|choose).{0,40}\b(locations?|cities)\b", q)
+                          and re.search(r"comfortable|open|willing|okay|\bok\b|prefer|work", q)):
         yes = bool(profile.get("willing_to_relocate"))
         if has_opts:
             i = _yes_no(options, yes)
@@ -1022,7 +1179,7 @@ def rule_answer(question: str, options: list[str], kind: str, profile: dict) -> 
     # ---- work authorization / visa sponsorship: answered for the country the candidate is authorized in (India).
     # The bot only applies to India-based roles; a question naming another country gets no automatic answer.
     auth_country = str(profile.get("work_authorized_in") or "").lower()
-    if auth_country and re.search(r"(legally )?authori[sz]ed (\(or eligible\) |or eligible )?to work|eligible to work|right to work|work permit|"
+    if auth_country and re.search(r"(legally )?authori[sz]ed (\(or eligible\) |or eligible )?to work|eligible to work|right to work|work permit|legal right to (perform|work)|"
                                   r"verification of (both )?your identity and authori[sz]ation", q):
         other = re.search(r"\b(united states|usa|u\.s\.|uk|united kingdom|canada|europe|germany|singapore|australia)\b", q)
         if not other:
@@ -1048,7 +1205,7 @@ def rule_answer(question: str, options: list[str], kind: str, profile: dict) -> 
     if profile.get("no_conflicts_of_interest") and re.search(
             r"related to anyone|close personal relationship|relative.{0,40}(employee|work)|government (office|agency|official)|"
             r"(relations|relatives|blood relati\w*|family members?|spouse|friends?).{0,60}(employ|work|position|board|director)|"
-            r"any relatives|covered relationships?|senior management|"
+            r"any relatives|covered relationships?|senior management|immediate family|family member.{0,80}(partner|employee|director|officer)|"
             r"oversight over|negotiate.{0,60}contracts|sign commercial|outside employment|outside activit|conflict of interest|"
             r"politically exposed", q):
         if has_opts:

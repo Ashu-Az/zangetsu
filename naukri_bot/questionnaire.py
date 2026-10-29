@@ -24,6 +24,13 @@ from .tracker import Tracker
 log = logging.getLogger(__name__)
 
 
+def _fmt_years(profile: dict) -> str:
+    """Years to type for a named skill with no listed value: default_skill_years when Ashu assumes experience
+    (2, 21 Oct 2026), else the truthful 0."""
+    y = float(profile.get("default_skill_years") or 0) if profile.get("assume_skill_experience") else 0.0
+    return str(int(y)) if y == int(y) else str(y)
+
+
 @dataclass
 class QuestionnaireResult:
     completed: bool
@@ -34,6 +41,8 @@ class QuestionnaireResult:
 INFO_MESSAGE = re.compile(r"recruiter requires more information|please answer (the following|a few)|"
                           r"kindly answer all the recruiter|thank you for showing interest|"   # Neo's drawer intro (14 Oct 2026)
                           r"answer (a few|the following) questions|to consider your appl", re.I)
+# a chatbot acknowledgement after an answer (24 Oct 2026: "Got it!" was answered by the LLM as if it were a question)
+ACK_MESSAGE = re.compile(r"^\W*(got it|thanks?( you)?|okay|ok|noted|great|perfect|alright|sure)\W*$", re.I)
 
 
 class NeedsModel(Exception):
@@ -69,6 +78,16 @@ class DrawerHandler:
             except Exception:
                 continue
         return None
+
+    def _wait_fv(self, selector: str, tries: int = 8):
+        # the chat re-renders its input while the next bubble animates in (Proclink / Vroom, 24 Oct 2026:
+        # "'NoneType' object has no attribute 'click'"): look again for a few seconds before giving up
+        for _ in range(tries):
+            el = self._fv(selector)
+            if el is not None:
+                return el
+            time.sleep(0.6)
+        raise RuntimeError(f"input disappeared: {selector[:40]}")
 
     def drawer_visible(self) -> bool:
         return self.b.first_visible(S.DRAWER) is not None
@@ -160,7 +179,7 @@ class DrawerHandler:
         return True
 
     def _click_options(self, container_sel: str, label_sel: str, indices: list[int]) -> None:
-        cont = self._fv(container_sel)
+        cont = self._wait_fv(container_sel)
         labels = cont.locator(label_sel)
         for idx in indices:
             if 0 <= idx < labels.count():
@@ -173,12 +192,12 @@ class DrawerHandler:
         elif kind == "checkbox":
             self._click_options(S.CHECKBOX_CONTAINER, S.CHECKBOX_LABEL, answer.selected_option_indices)
         elif kind == "dropdown":
-            sel = self._fv(S.DROPDOWN)
+            sel = self._wait_fv(S.DROPDOWN)
             idx = answer.selected_option_indices[0] if answer.selected_option_indices else None
             label = options[idx] if idx is not None and idx < len(options) else answer.answer_text
             sel.select_option(label=label)
         elif kind == "suggestor":
-            inp = self._fv(S.SUGGESTOR_INPUT)
+            inp = self._wait_fv(S.SUGGESTOR_INPUT)
             inp.click()
             inp.fill("")
             self.page.keyboard.type(answer.answer_text, delay=random.randint(50, 130))
@@ -187,7 +206,7 @@ class DrawerHandler:
             if opt:
                 opt.click()
         else:  # free text in contenteditable
-            box = self._fv(S.TEXT_INPUT)
+            box = self._wait_fv(S.TEXT_INPUT)
             box.click()
             box.evaluate("e => { if (e.isContentEditable) e.innerText = ''; else e.value = ''; }")
             self.page.keyboard.type(answer.answer_text, delay=random.randint(35, 110))
@@ -304,6 +323,15 @@ class DrawerHandler:
                 self.msg_count_at_answer = self.bot_message_count()
                 if self.wait_for_next_message(timeout_s=6):
                     continue
+            if ACK_MESSAGE.match(question):
+                self.msg_count_at_answer = self.bot_message_count()
+                if not self.wait_for_next_message(timeout_s=10):
+                    idle += 1
+                    if idle >= 8:
+                        result.completed = self.b.text_present(S.APPLY_SUCCESS_TEXT) or not self.drawer_visible()
+                        result.notes = "no question after acknowledgement" if result.completed else "stalled"
+                        return result
+                continue
             kind, options = self.detect_input()
             if kind is None:
                 idle += 1
@@ -362,14 +390,14 @@ class DrawerHandler:
                 return result
 
             if ans.skip or (not ans.answer_text and not ans.selected_option_indices):
-                # "How many years of experience in <tool not on the resume>?": the truthful answer is 0, and the
-                # application should still go in (Robot Framework, Tech Mahindra, 16 Oct 2026; Ashu: No/0 only when
-                # the tech was never used). Never for tenure-in-total questions, only a named skill.
+                # "How many years of experience in <tool not on the resume>?": default_skill_years (Ashu, 21 Oct
+                # 2026: "everything is 2"), so the application still goes in. Never for tenure-in-total questions.
                 if kind == "text" and not options and re.search(r"how many years|years of experience|experience (do you have )?in", question, re.I) \
                         and not re.search(r"total|overall|relevant|professional|work experience\??$", question, re.I):
                     from .llm import QuestionAnswer
-                    ans, source = QuestionAnswer(answer_text="0", selected_option_indices=[], reusable=True, skip=False,
-                                                 confidence=0.9), "rules:not-on-resume"
+                    from .config import load_profile
+                    ans, source = QuestionAnswer(answer_text=_fmt_years(load_profile()), selected_option_indices=[], reusable=True, skip=False,
+                                                 confidence=0.9), "rules:default-skill-years"
                     from .ask_ashu import record
                     record(question, options, "naukri", getattr(self.job, "company", ""))   # Ashu can correct it later
             if ans.skip or (not ans.answer_text and not ans.selected_option_indices):

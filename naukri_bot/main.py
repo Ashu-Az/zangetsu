@@ -240,6 +240,22 @@ def survey_jobs(b: Browser, cards, settings: Settings, profile: dict, tracker: T
             tracker.mark_seen(card.job_id, "excluded_company")
             skipped += 1
             continue
+        # cheap checks from the card itself, before opening the page: companies like Accenture post one role
+        # dozens of times, and opening each copy costs ~10 s
+        if Tracker.role_key(card.company, card.title) in recent_roles:
+            log.info("  [%d/%d] already applied to this role: %s — %s", i, len(cards), card.title[:50], card.company[:25])
+            tracker.mark_seen(card.job_id, "same_role_applied_recently")
+            skipped += 1
+            continue
+        m = re.search(r"-(\d+)-to-(\d+)-years?-", card.url)
+        card_exp = card.experience or (f"{m.group(1)} - {m.group(2)} years" if m else "")
+        years = float(settings.experience_years) if settings.experience_years else None
+        if card_exp and not JobPosting(job_id=card.job_id, url=card.url, experience=card_exp).experience_fits(
+                years, slack=settings.experience_slack):
+            log.info("  [%d/%d] experience %s: %s — %s", i, len(cards), card_exp, card.title[:50], card.company[:25])
+            tracker.mark_seen(card.job_id, f"experience_mismatch:{card_exp}")
+            skipped += 1
+            continue
         cached = survey.get(card.job_id)
         if cached:
             job, mode = cached
@@ -643,6 +659,13 @@ def cmd_company_apply(settings: Settings, args) -> int:
                     b.goto(url)
                 else:
                     b.goto(url)
+                    if "myworkdayjobs.com" in url or "myworkdaysite.com" in url:
+                        # Workday renders the description after load: reading too early scored only the title
+                        # (Salesforce, 21 Oct 2026: "ATS match 100 (job_title 100)")
+                        try:
+                            b.page.locator("[data-automation-id='jobPostingDescription']").first.wait_for(timeout=20000)
+                        except Exception:
+                            pass
                     jd = b.body_text()
                 title = role or (b.page.locator("h1").first.inner_text().strip() if b.page.locator("h1").count() else "")
                 company = company_from_url(url)
@@ -657,11 +680,36 @@ def cmd_company_apply(settings: Settings, args) -> int:
                                          assist=False, submit=args.submit).run(url)
                 else:
                     # Greenhouse, Lever, Ashby, Keka, Zoho Recruit and plain career pages: label-driven filler
-                    gf = GenericFormApplier(b.page, profile, str(pdf), role=title, submit=args.submit,
-                                            code_file=str(Path("state/security-code.txt").resolve()) if args.submit else None)
+                    app = GenericFormApplier(b.page, profile, str(pdf), role=title, submit=args.submit,
+                                             code_file=str(Path("state/security-code.txt").resolve()) if args.submit else None)
                     if "naukri.com" in (jd_url or ""):
-                        gf.fallback_country = "India"   # pipeline only keeps Naukri postings in Indian locations
-                    res = gf.run(url)
+                        app.fallback_country = "India"   # pipeline only keeps Naukri postings in Indian locations
+                    res = app.run(url)
+                    landed = getattr(app, "pg", b.page).url
+                    if res.status not in SUBMITTED_STATUSES and ("myworkdayjobs.com" in landed or "myworkdaysite.com" in landed):
+                        # the career page's Apply button led to Workday (Amgen / Barclays Radancy pages, 25 Oct 2026):
+                        # hand over to the Workday applier on that page
+                        import os
+                        from .ats.workday import WorkdayApplier
+                        log.info("  Apply led to Workday: %s", landed[:100])
+                        b.page = app.pg
+                        job_page = re.sub(r"/apply(/.*)?(\?.*)?$", "", landed.split("?")[0])   # the applier starts from the job page
+                        res = WorkdayApplier(b.page, profile, os.getenv("WORKDAY_EMAIL", "").strip(),
+                                             os.getenv("WORKDAY_PASSWORD", "").strip(), str(pdf),
+                                             assist=False, submit=args.submit).run(job_page)
+                    if getattr(app, "mailto", ""):
+                        # email-only job: queue it for a Gmail application with this tailored resume (never Apple Mail)
+                        import csv as _c
+                        from datetime import datetime
+                        q = Path("output/email_only_jobs.csv")
+                        new = not q.exists()
+                        with q.open("a", newline="", encoding="utf-8") as fh:
+                            w = _c.writer(fh)
+                            if new:
+                                w.writerow(["timestamp", "email", "company", "title", "url", "resume_pdf", "status"])
+                            w.writerow([datetime.now().isoformat(timespec="seconds"), app.mailto, company, title, url, str(pdf), "to_send"])
+                    if res.status not in SUBMITTED_STATUSES:
+                        app.ensure_resume()               # never leave a form for Ashu without the resume attached
             except Exception as e:
                 b.save_debug("company-apply-crash")
                 log.warning("  crashed: %s", str(e)[:150])
@@ -677,6 +725,7 @@ def cmd_company_apply(settings: Settings, args) -> int:
             if last_left:
                 left_for_person += 1
                 log.info("  (this tab stays open for you; the next form opens in a new tab)")
+                log.info("  resume for this form: %s", pdf)
             job = JobPosting(job_id=url, url=url, title=title, company=company)
             tracker.record_application(job, "company_site", res.status, notes=res.notes[:200], resume_pdf=str(pdf), remember=False)
             if args.hold:

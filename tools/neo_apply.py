@@ -42,6 +42,8 @@ ASKS = ["Find jobs matching my profile", "Show me more jobs like these", "Show m
 dry = "--dry-run" in sys.argv
 MAX = int(sys.argv[sys.argv.index("--max") + 1]) if "--max" in sys.argv else 15
 ONLY = re.compile(sys.argv[sys.argv.index("--only") + 1], re.I) if "--only" in sys.argv else None
+# --force with --only: Ashu picked this job himself, so the title filters (excluded / non-tech titles) do not apply
+FORCE = ONLY is not None and "--force" in sys.argv
 # suggestions not applied yet (cap, cooldown, unconfirmed): retried first on the next run, for up to 4 days
 PENDING = "state/neo_pending.json"
 
@@ -108,12 +110,22 @@ def close_panel(pg) -> None:
         time.sleep(1)
 
 
-def ask_neo(pg, text: str, wait_s: int = 45) -> int:
+def ask_neo(pg, text: str, wait_s: int = 90) -> int:   # Neo can take over a minute to answer (21 Oct 2026: 0 cards at 45 s)
     """Type a request into Neo's chat; return how many job cards are on the page once new ones arrive."""
     close_panel(pg)
     before = pg.locator(CARD).count()
     box = pg.locator(CHAT_BOX).last
-    box.click()
+    try:
+        box.click(timeout=5000)
+    except Exception:
+        # something still covers the chat box (a job panel left open after a skipped card, 21 Oct 2026)
+        pg.screenshot(path=f"output/debug/{time.strftime('%Y%m%d-%H%M%S')}-neo-chatbox-covered.png")
+        close_panel(pg); pg.keyboard.press("Escape"); time.sleep(1)
+        try:
+            box.click(timeout=5000)
+        except Exception:
+            box.scroll_into_view_if_needed(timeout=3000)
+            box.evaluate("e => e.focus()")
     pg.keyboard.type(text, delay=35)
     pg.keyboard.press("Enter")
     deadline = time.time() + wait_s
@@ -184,6 +196,16 @@ def new_button(pg, label: str, baseline: dict | None = None):
     return None
 
 
+def _click(el) -> None:
+    """Click, and when something sits on top of the button (Neo's "Neo's take" card slides over the panel's
+    Apply buttons; Tata Elxsi, 20 Oct) click the element itself instead of waiting 15 s for it to clear."""
+    try:
+        el.click(timeout=5000)
+    except Exception:
+        el.scroll_into_view_if_needed(timeout=3000)
+        el.evaluate("e => e.click()")
+
+
 def neo_apply_one(b: Browser, llm, cache, tracker, job) -> str:
     """The open side panel's job, step by step and only with the buttons Neo shows for THIS job:
     custom resume -> wait until the resume step is done -> tailored resume (else original) -> answer the recruiter's
@@ -196,12 +218,12 @@ def neo_apply_one(b: Browser, llm, cache, tracker, job) -> str:
     if btn is None:
         return "failed:no apply button in Neo's panel"
     used = btn.inner_text().strip()
-    btn.click()
+    _click(btn)
     log.info("  clicked %r", used)
     # "Apply now" has no resume step: Neo goes straight to the recruiter's questions
     # (16 Oct 2026: Infosys/Indium failed after 4 min waiting for resume buttons
     # while "Add missing details" was on screen)
-    step, answered = ("resume" if used == "Apply with custom Resume" else "questions"), None
+    step, answered, answered_at = ("resume" if used == "Apply with custom Resume" else "questions"), None, 0.0
     deadline = time.time() + 240
     while time.time() < deadline:
         time.sleep(3)
@@ -224,22 +246,24 @@ def neo_apply_one(b: Browser, llm, cache, tracker, job) -> str:
             choice = "Apply with tailored Resume"
             if el is None:
                 el, choice = new_button(pg, "Use original Resume", baseline), "Use original Resume"
-            el.click(); step = "questions"
+            _click(el); step = "questions"
             log.info("  resume ready -> clicked %r", choice)
             continue
         if step == "questions":
             el = new_button(pg, "Add missing details", baseline)
             if el is None:
                 continue
-            el.click(); step = "answering"
+            _click(el); step = "answering"
             log.info("  clicked 'Add missing details'")
             handler = DrawerHandler(b, llm, cache, tracker, job, assist=False)
             if handler.wait_for_drawer(timeout_s=10):
                 answered = handler.run()
                 log.info("  questions: %d answered, completed=%s %s", len(answered.answered), answered.completed, answered.notes[:80])
+            answered_at = time.time()
             continue
-        if step == "answering" and time.time() > deadline - 180:
-            break                                  # answered; give Neo a minute to post its result, then confirm
+        if step == "answering" and time.time() > answered_at + 45:
+            break        # answered: give Neo 45 s from the last answer to post its result (Cimpress, 21 Oct 2026: the
+                         # old fixed deadline had already passed during a slow resume step), then confirm
     # confirm on the job page: "Applied" replaces the Apply button
     with Side(b):
         try:
@@ -291,7 +315,11 @@ def main() -> None:
         rounds = 0
         try:
             while applied < MAX and rounds < len(ASKS):
-                n = ask_neo(pg, ASKS[rounds]); rounds += 1
+                try:
+                    n = ask_neo(pg, ASKS[rounds]); rounds += 1
+                except Exception as e:
+                    log.warning("Neo: could not ask for more jobs (%s); stopping Neo for this run", str(e)[:120])
+                    break
                 titles = [" ".join(t.split()) for t in pg.locator(CARD).all_inner_texts()]
                 log.info("Neo round %d: %d cards %s", rounds, n, titles[-8:])
                 progress = False
@@ -327,6 +355,8 @@ def main() -> None:
                     # (Okta "Enterprise Account Executive" was applied to, 15 Oct 2026)
                     if not reason and not TECH_TITLE.search(job.title or title):
                         reason = "not_a_tech_title"
+                    if reason in ("excluded_title", "title_not_in_include_list", "not_a_tech_title") and FORCE:
+                        log.info("  title filter (%s) overridden: picked by Ashu", reason); reason = None
                     if reason:
                         log.info("  skip: %s", reason); pending.pop(jid, None); continue
                     if mode != ApplyMode.NAUKRI:

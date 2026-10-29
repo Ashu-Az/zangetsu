@@ -1,3 +1,5 @@
+import pytest
+
 from naukri_bot.rules import rule_answer
 
 P = {"notice_period_days": 15, "current_ctc_lpa": 7.5, "expected_ctc_lpa": 14, "total_experience_years": 2,
@@ -378,9 +380,12 @@ def test_social_media_url_box_left_empty():
     assert a is not None and a.answer_text == ""
 
 
-def test_how_heard_dropdown_without_naukri_picks_job_board():
+def test_how_heard_dropdown_without_naukri_picks_linkedin_then_job_board():
+    # merge 29 Oct 2026: the other machine's order (Brivo, 22 Oct) is Naukri > LinkedIn > job board > Other
     opts = ["Pick one", "LinkedIn", "Referral", "Social Media", "Job Board"]
     a = rule_answer("HOW DID YOU CROSS PATHS WITH US?", opts, "select", {})
+    assert a is not None and a.answer_text == "LinkedIn"
+    a = rule_answer("HOW DID YOU CROSS PATHS WITH US?", ["Pick one", "Referral", "Social Media", "Job Board"], "select", {})
     assert a is not None and a.answer_text == "Job Board"
 
 
@@ -397,3 +402,22 @@ def test_cctc_ectc_shorthand():
     p = {"current_ctc_lpa": 7.5, "expected_ctc_lpa": 14}
     assert rule_answer("CCTC", [], "text", p) is not None
     assert rule_answer("ECTC", [], "text", p) is not None
+
+
+@pytest.mark.parametrize("q,opts,expect", [
+    # Workday application questions that stalled forms on 28 Oct 2026 (Barclays, ABC Financial)
+    ("Are you involved in any Legal proceedings?", ["Select One", "Yes", "No"], 2),
+    ("Have you ever been subject to investigation by or disciplined/cautioned by a regulatory body?", ["Select One", "Yes", "No"], 2),
+    ("Do you currently reside within India?", ["Select One", "Yes", "No"], 1),
+    ("Have you been employed within the last 24 months by the Barclays Group Statutory Auditor, KPMG?", ["Select One", "Yes", "No"], 2),
+    ("This is a hybrid role, requiring working from our Hyderabad office 2-3x a week, do you have any concerns with this work arrangement?", ["Select One", "Yes", "No"], 2),
+    ("Do you have the legal right to perform this role in India?", ["Yes", "No"], 0),
+    ("Is your right to work based (either now or in the future) on a visa or sponsorship?", ["Yes", "No"], 1),
+])
+def test_workday_questions_28_oct(q, opts, expect):
+    r = rule_answer(q, opts, "dropdown", dict(P, no_legal_issues=True, work_authorized_in="India"))
+    assert r and r.selected_option_indices == [expect]
+
+
+def test_soonest_start_is_immediate():
+    assert rule_answer("What is the soonest you would be able to start?", [], "text", P).answer_text == "Immediately"

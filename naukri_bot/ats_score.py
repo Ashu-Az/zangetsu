@@ -142,22 +142,71 @@ NOT_SKILLS = re.compile(r"(?i)\bamerican express\b|\bexpress (scripts|employment
                         r"\bcapital one\b|\bnext (education|gen)\b|\breact(ion|ive)\b")
 
 
-def extract_requirements(jd_text: str) -> list[str]:
+_NAUKRI_END = re.compile(r"(?i)^(report this job|about company|company info|similar jobs|beware of|reviews|apply|"
+                         r"save|share|role:?|industry type|department|education|employment type|location|"
+                         r"work experience|job description|job match score|early applicant|salary)\b")
+_NOT_A_SKILL = {"ai", "ml", "it", "cloud", "programming", "software", "development", "communication", "teamwork",
+                "problem solving", "coding", "technology", "engineering", "analytics", "data", "testing"}
+
+
+def _naukri_key_skills(text: str) -> list[str]:
+    """Naukri job pages list their key skills as one tag per line under a "Key Skills" heading (21 Oct 2026: the
+    dotcom.co.in posting had 19 there and the scorer saw none of them)."""
+    lines = [l.strip() for l in (text or "").splitlines()]
+    out = []
+    for i, l in enumerate(lines):
+        if re.fullmatch(r"(?i)key ?skills", l):
+            out = []                       # the last "Key Skills" block is the tag list (the first sits in the match-score box)
+            for t in lines[i + 1:i + 40]:
+                if not t:
+                    continue
+                if _NAUKRI_END.match(t) or len(t) > 40 or len(t.split()) > 4:
+                    break
+                out.append(t)
+    return out
+
+
+# multi-word practices recruiters search for, and plural acronyms ("CNNs, RNNs")
+_PHRASE = re.compile(r"(?i)\b((?:[a-z][a-z+#.-]*[ \t]){0,2}(?:tuning|engineering|preprocessing|pre-processing|deployment|"
+                     r"integration|pipelines?|modell?ing|orchestration|retrieval|evaluation|optimi[sz]ation|monitoring|"
+                     r"automation|microservices|architecture))\b")
+_ACRONYMS = re.compile(r"\b([A-Z]{2,5})s\b")
+_PHRASE_STOP = re.compile(r"(?i)^(and|or|to|the|with|for|of|in|on|a|an|improve|work|develop|implement|optimi[sz]e|"
+                          r"design|build|strong|good|solid|hands-on|experience|knowledge|our|your|model|software|"
+                          r"collaborate|cross-functional|teams?|through|performance)\b")
+
+
+def _jd_phrases(text: str) -> list[str]:
+    out = []
+    for m in _PHRASE.finditer(text or ""):
+        words = m.group(1).split()
+        while words and _PHRASE_STOP.match(words[0]):
+            words = words[1:]
+        if len(words) >= 2:
+            out.append(" ".join(words).lower())
+    out += [m.group(1) + "s" for m in _ACRONYMS.finditer(text or "") if m.group(1) not in ("API", "PDF", "URL", "KPI", "SLA")]
+    return out
+
+
+def extract_requirements(jd_text: str, skills: list[str] | None = None) -> list[str]:
     """Hard-skill keywords the job description asks for: curated tech vocabulary found in the JD (requirement
-    sections first when the JD has them) plus the items of any 'Key skills:' line."""
+    sections first when the JD has them), the items of any 'Key skills:' line, Naukri's key-skill tags, the
+    job's own skill list when known, and technical phrases from the JD text."""
     # company and product names that contain a tech word are not skills ("American Express" is not Express.js;
     # seen in a client list, 10 Oct 2026)
     jd_text = NOT_SKILLS.sub(" ", jd_text or "")
     sec = _sections(jd_text)
     ordered = (_vocab_in(sec["must"]) + _vocab_in(sec["nice"]) + _vocab_in(sec["other"])) if sec["found"] else _vocab_in(jd_text)
-    return _dedupe(ordered + _key_skill_lines(jd_text))
+    extra = [t for t in _naukri_key_skills(jd_text) + list(skills or []) + _jd_phrases(jd_text)
+             if t.strip().lower() not in _NOT_A_SKILL]
+    return _dedupe(ordered + _key_skill_lines(jd_text) + extra)
 
 
-def report(resume_text: str, jd_text: str) -> dict:
+def report(resume_text: str, jd_text: str, skills: list[str] | None = None) -> dict:
     """Keyword-coverage heuristic (not a real ATS score) of the resume against the JD's own requirements:
     {kind, score, matched, missing (true gaps), requirements, must_have, nice_to_have}. must_have / nice_to_have
     are {score, matched, missing} when the JD has detectable sections, else None."""
-    reqs = extract_requirements(jd_text)
+    reqs = extract_requirements(jd_text, skills)
     pct, hit, miss = score(resume_text, reqs)
     out = {"kind": "keyword-coverage heuristic (not an ATS score)", "score": pct, "matched": hit, "missing": miss,
            "requirements": reqs, "must_have": None, "nice_to_have": None}

@@ -46,7 +46,11 @@ NOT_RECRUITER = re.compile(r"(?i)naukri|noreply|no-reply|donotreply|example\.|pr
                            # inboxes for other purposes found in JDs (Aon's reasonableaccommodations@, 14 Oct 2026)
                            r"accommodat|accessib|disabilit|compliance|legal@|security@|ethics|whistle|"
                            r"billing|invoice|accounts@|sales@|marketing@|media@|press@|investor")
-GENERIC_LOCAL = re.compile(r"(?i)^(hr|jobs?|careers?|recruit(ment|ing)?|talent|hiring|resume|cv|apply|info|hello|contact|team)\b")
+GENERIC_LOCAL = re.compile(r"(?i)^(hr|jobs?|careers?|recruit(ment|ing)?|talent|hiring|resume|cv|apply|info|hello|contact|team|"
+                           r"ta|tateam|hrteam|ta[._-]?team|people|staffing)\b")
+# common Indian surnames: "singh.nikita" is surname first, so greet the second part (23 Oct 2026)
+SURNAMES = {"singh", "sharma", "kumar", "gupta", "verma", "patel", "shah", "jain", "agarwal", "agrawal", "reddy", "rao",
+            "nair", "iyer", "mehta", "joshi", "mishra", "pandey", "yadav", "khan", "das", "roy", "chauhan", "bansal"}
 
 
 @dataclass
@@ -150,6 +154,10 @@ def rejected_companies(tracker: Tracker, days: int = 90) -> set[str]:
 
 def clean_title(title: str, company: str = "") -> str:
     """'Gen AI _Opportunity at Fractal Analytics' -> 'Gen AI'; 'Hiring | AI Engineer | StatusNeo' -> 'AI Engineer'."""
+    # "#AIDataEngineer #MLOpsEngineer ..." is a hashtag list, not a title (22 Oct 2026): first tag, split into words
+    if (title or "").lstrip().startswith("#"):
+        tag = re.findall(r"#(\w+)", title)
+        title = re.sub(r"(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])", " ", tag[0]) if tag else ""
     t = re.sub(r"[_|]+", " | ", title or "")
     parts = [x.strip(" -") for x in t.split("|") if x.strip(" -")]
     parts = [x for x in parts if not re.fullmatch(r"(?i)(urgent(ly)? )?(hiring|requirement|opening|job)s?( for)?|.*\bopportunity\b.*", x)
@@ -187,6 +195,9 @@ def select(settings: Settings, profile: dict, tracker: Tracker, sources: list[st
     for lead in leads:
         if lead.email in addresses or lead.domain in domains or lead.domain in seen_domains:
             continue
+        if not re.fullmatch(r"[\w.+-]+@[\w-]+(\.[\w-]+)*\.(com|in|io|ai|co|org|net|tech|dev|biz|us|uk|app|info|me)", lead.email or ""):
+            log.debug("skip %s: not a complete email address", lead.email)   # "and@kbnbfc.in.candidates" (27 Oct 2026)
+            continue
         if _company_key(lead.company) in rejected_companies(tracker):
             log.debug("skip %s (%s): company rejected recently", lead.email, lead.company)
             continue
@@ -199,6 +210,14 @@ def select(settings: Settings, profile: dict, tracker: Tracker, sources: list[st
             reason = f"experience_too_far_for_email:{lead.experience}"
         if not reason and lookalike_domain(lead.email, lead.company):
             reason = f"lookalike_domain:{lead.domain}"
+        # college addresses post student-placement openings (jbitdoon.edu.in, 24 Oct 2026); research institutes (.res.in) are fine
+        if not reason and re.search(r"\.edu(\.[a-z]{2})?$|\.ac\.in$", lead.domain):
+            reason = f"college_address:{lead.domain}"
+        # LinkedIn post text often omits the years: use the post's own "N+ years" (neorays wanted more than 2, 24 Oct 2026)
+        if not reason and not lead.experience:
+            m = re.search(r"(\d+)\s*\+?\s*(?:-|to|–)?\s*\d*\s*(?:years?|yrs)", lead.jd or "", re.I)
+            if m and years is not None and int(m.group(1)) > years + 1:
+                reason = f"experience_too_far_for_email:{m.group(0)}"
         if reason:
             log.debug("skip %s (%s): %s", lead.email, lead.title, reason)
             continue
@@ -213,9 +232,31 @@ def select(settings: Settings, profile: dict, tracker: Tracker, sources: list[st
 def _greeting(lead: Lead) -> str:
     local = lead.email.split("@")[0]
     if GENERIC_LOCAL.match(local) or not re.match(r"[a-z]{3,}", local):
+        if lead.company and not _real_company(lead):              # the "company" is the poster: greet them by first name
+            return f"Hi {lead.company.split()[0].capitalize()},"
         return f"Hello {lead.company} hiring team," if lead.company else "Hello,"
-    first = re.split(r"[._\-\d]", local)[0]
+    parts = [x for x in re.split(r"[._\-\d]", local) if x]
+    first = parts[1] if len(parts) > 1 and parts[0].lower() in SURNAMES and parts[1].isalpha() else (parts[0] if parts else local)
+    if len(first) > 10:          # "manimaranilangovan": first and last name run together, can't split it reliably
+        return f"Hello {lead.company} hiring team," if lead.company else "Hello,"
     return f"Hi {first.capitalize()},"
+
+
+def _real_company(lead: Lead) -> bool:
+    """False when the 'company' is just the poster's own name ("opening at Piyush Kumar", 24 Oct 2026)."""
+    c = (lead.company or "").strip()
+    if not c:
+        return False
+    local = (lead.email or "").split("@")[0].lower() if getattr(lead, "email", None) else ""
+    words = [w.lower() for w in re.findall(r"[A-Za-z]+", c)]
+    looks_personal = 1 <= len(words) <= 3 and not re.search(r"\b(ai|tech\w*|labs?|solutions?|systems|software|services|"
+                                                              r"consult\w*|pvt|ltd|inc|llp|group|global|digital|infotech|india)\b", c, re.I)
+    domain = (lead.email or "").split("@")[-1].lower() if getattr(lead, "email", None) else ""
+    # a two-word name that appears nowhere in the address is a person ("Deepa Joshi" at hr@devtrust.biz, 27 Oct 2026)
+    in_address = any(w in local or w in domain for w in words if len(w) > 2)
+    return not (looks_personal and (in_address and any(w in local for w in words if len(w) > 2)
+                                    or (len(words) == 2 and not in_address)
+                                    or getattr(lead, "author", "") == c))
 
 
 def compose(lead: Lead, profile: dict, coverage: dict) -> tuple[str, str]:
@@ -227,22 +268,35 @@ def compose(lead: Lead, profile: dict, coverage: dict) -> tuple[str, str]:
     # immediate joiner (Ashu, 15 Oct 2026: last day at Quess 20 Oct) instead of the notice period
     immediate = bool(profile.get("immediate_joiner"))
     lwd = profile.get("last_working_day_text") or "20 Oct"
+    # "was 20 Oct" once that date has passed (21 Oct 2026 drafts still said "is")
+    try:
+        from datetime import date, datetime
+        lwd_verb = "was" if datetime.strptime(str(profile.get("last_working_day") or ""), "%d/%m/%Y").date() < date.today() else "is"
+    except ValueError:
+        lwd_verb = "is"
     subject = f"Application for {title} - {name} ({years} yrs, " + ("immediate joiner)" if immediate else f"{notice}-day notice)")
     # technologies only: "Code reviews" or "Agile" are practices, not "the stack I work in"
     practice = re.compile(r"code reviews?|agile|scrum|testing|documentation|communication|problem[- ]solving|teamwork|sdlc", re.I)
-    matched = [m for m in coverage.get("matched", []) if len(m) > 1 and not practice.fullmatch(m.strip())][:5]
+    junk = re.compile(r"highlighted|preferred|keyskills?|key skills|[‘’'\",]", re.I)     # page text, not a skill (E Trav Tech)
+    matched = [m for m in coverage.get("matched", []) if len(m) > 1 and len(m.split()) <= 4
+               and not practice.fullmatch(m.strip()) and not junk.search(m)]
+    # only skills on Ashu's resume: a post's Scala / Integration testing is not "the stack I work in every day" (24 Oct 2026)
+    mine = {x.lower() for x in (profile.get("skills_primary") or []) + (profile.get("skills_secondary") or [])}
+    mine |= {"machine learning", "generative ai", "rest apis", "rest api", "llm", "nlp", "sql", "docker", "microservices",
+             "prompt engineering", "vector database", "pandas", "numpy"}
+    matched = [m for m in matched if m.lower() in mine or not profile.get("skills_primary")][:5]
     skills_line = (f"The role asks for {', '.join(matched[:-1])} and {matched[-1]}, which is the stack I work in every day."
                    if len(matched) >= 2 else "My background lines up closely with what the role describes.")
     highlights = profile.get("outreach_highlights") or []
     body = "\n".join([
         _greeting(lead),
         "",
-        f"I came across the {title} opening{' at ' + lead.company if lead.company else ''} and would like to apply. "
+        f"I came across the {title} opening{' at ' + lead.company if _real_company(lead) else ''} and would like to apply. "
         f"I am a {profile.get('current_title', 'software engineer')} with {years} years of experience. {skills_line}",
         "",
         *[f"- {h}" for h in highlights[:3]],
         "" if highlights else "",
-        (f"I can join immediately (my last day at my current job is {lwd})." if immediate else f"My notice period is {notice} days.")
+        (f"I can join immediately (my last day at my previous job {lwd_verb} {lwd})." if immediate else f"My notice period is {notice} days.")
         + " I've attached a resume tailored to this role and would be glad to talk.",
         "",
         "Thanks,",

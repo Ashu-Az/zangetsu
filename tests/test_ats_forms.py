@@ -306,3 +306,21 @@ def test_cover_letter_box_regex_catches_hint_and_name():
     import re
     rx = r"cover[ _-]?letter|why (do you|are you|you.?re|you are)|interested in (this|the) (role|job|position)"
     assert re.search(rx, "Tell us why you're interested in this role... cover letter", re.I)
+
+
+def test_workday_disability_group_with_generic_label():
+    # PayPal (26 Oct 2026): the disability checkbox group is labelled only "Please check one of the boxes below:"
+    opts = ["I DON'T WISH TO ANSWER (India)", "NO. I DON'T HAVE A DISABILITY (India)",
+            "YES, I HAVE A DISABILITY (or previously had a disability) (India)"]
+    assert workday(disability=False)._choice_for("Please check one of the boxes below:", opts) == 1
+    assert workday(disability=False)._choice_for("Please check one of the boxes below:", ["Red", "Blue"]) is None
+
+
+def test_workday_younger_than_18():
+    assert workday()._choice_for("Are you younger than 18 years old?", ["Yes", "No"]) == 1
+
+
+def test_workday_how_heard_career_site():
+    # Cigna (29 Oct 2026): no job-board option, only Agency / Career Site / Recruiter / Referred by Employee
+    opts = ["Select One", "Agency", "Career Site", "Recruiter", "Referred by Employee"]
+    assert workday(how_heard=[])._choice_for("How Did You Hear About Us?", opts) == 2

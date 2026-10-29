@@ -40,7 +40,7 @@ rows = [r for r in csv.DictReader(open("output/company_site_jobs.csv", encoding=
 open("output/cycles/company-today.txt", "w").write("".join(f'{r["external_url"]} | {r["title"]} | {r["naukri_url"]}\n' for r in rows))
 print("company-site jobs to apply:", len(rows))
 PYEOF
-  [ -s output/cycles/company-today.txt ] && $PY -m naukri_bot company-apply --file output/cycles/company-today.txt --submit --no-wait --browser-profile ats-profile-2
+  [ -s output/cycles/company-today.txt ] && $PY -m naukri_bot company-apply --file output/cycles/company-today.txt --submit --no-wait --browser-profile "${ATS_PROFILE:-ats-profile-cycle}"
   echo "=== done $(date)"
 } >> "$LOG" 2>&1
 echo "$LOG"
