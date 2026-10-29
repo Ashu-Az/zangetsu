@@ -86,7 +86,7 @@ LEGAL_CLAIM = re.compile(
 CONSENT_OK = re.compile(
     r"privacy|terms (of (use|service)|and conditions|& conditions)|\bterms\b|data (processing|protection|retention|privacy)|"
     r"process(ing|es|ed)? (of )?(my |your )?(personal )?(data|information)|personal (data|information)|retain|retention|cookie|gdpr|"
-    r"storage and handling|store (and|&) (handle|process)|storage of (my |your )?(data|information)|"
+    r"contact me (about|regarding|for) (future|other|new) (job |career )?(opportunities|openings|roles)|storage and handling|store (and|&) (handle|process)|storage of (my |your )?(data|information)|"
     # "I agree to share my details and resume with X so they can assess my application ... may be kept" (Grids and Guides)
     r"share (my|your) (details|data|information|resume|cv)|(may|will) be (kept|retained|stored)|"
     # "Cyepro may store my application and CV for 12 months to consider me for jobs" (19 Oct 2026)
