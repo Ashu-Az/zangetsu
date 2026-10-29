@@ -1071,6 +1071,11 @@ class GenericFormApplier:
                 hit = next((o for o in options if re.search(pat, o, re.I)), None)
                 if hit:
                     return hit
+        # "Team" / "Department" lists with no role names (Triazine: Any team / Sales / Delivery / Engineering)
+        if re.search(r"^\s*(team|department|function|area of interest)\b", l):
+            hit = next((o for o in options if re.search(r"engineering|technology|tech\b|development|it\b|data|ai", o, re.I)), None)
+            if hit:
+                return hit
         buckets = [(o, re.search(r"(\d+)\s*(?:-|to|–)\s*(\d+)\s*(?:years?|yrs)|<\s*(\d+)\s*years?|(\d+)\s*\+\s*years?", o, re.I)) for o in options]
         if sum(1 for _, m in buckets if m) >= 2:                      # experience buckets offered without a real label
             yrs = 2
