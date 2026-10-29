@@ -42,10 +42,21 @@ class WellfoundPortal(Portal):
         box_id = box.get_attribute("id") or ""
         if box_id:
             lab = dlg.locator(f"label[for='{box_id}']")
-            if lab.count():
+            if lab.count() and lab.first.inner_text().strip():
                 return " ".join(lab.first.inner_text().split())
-        txt = box.evaluate("e => (e.closest('div:has(> label), fieldset, div') || e.parentElement).innerText || ''")
-        return " ".join(txt.split())[:300]
+        # the question can sit in a sibling block above the box with an empty <label> (Steps AI, 21 Oct 2026:
+        # "What interests you about working for this company?" came back as ""): walk up until there is text,
+        # and keep the last sentence that ends in "?" when the block holds more than the question
+        txt = box.evaluate("""e => { let n = e;
+            for (let i = 0; i < 6 && n; i++) {
+                let p = n.previousElementSibling;
+                while (p) { const t = (p.innerText || '').trim(); if (t) return t; p = p.previousElementSibling; }
+                n = n.parentElement;
+                const t = n && (n.innerText || '').trim(); if (t) return t;
+            } return ''; }""")
+        txt = " ".join((txt or "").split())
+        qs = re.findall(r"[^?.!]*\?", txt)
+        return (qs[-1].strip() if qs else txt)[:300]
 
     def search_urls(self) -> list[str]:
         slugs = {ROLE_SLUGS.get(k.lower(), k.lower().replace(" ", "-")) for k in self.settings.keywords}

@@ -18,8 +18,10 @@ NOLLM=--no-llm; grep -qE "^(GROQ|ANTHROPIC)_API_KEY=.+" .env && NOLLM=
   # Naukri Pro early-access roles (hidden, pre-posting): share interest in the ones that pass the filters
   $PY -m naukri_bot early-access --max 30
   # 3. Naukri search and Hirist use separate browser profiles, so they run side by side
-  $PY -m naukri_bot run --source all --max 30 --only naukri $NOLLM --assist --max-applicants 100000 &
-  $PY -m naukri_bot portal hirist --max 15 &
+  # per-run cap (NAUKRI_RUN_MAX, default 15): spread search applies over the day so Neo keeps quota for late early-applies (Ashu, 29 Oct 2026)
+  $PY -m naukri_bot run --source all --max "${NAUKRI_RUN_MAX:-15}" --only naukri $NOLLM --assist --max-applicants 100000 &
+  # Hirist dropped (Ashu, 21 Oct 2026: no responses from it); Wellfound instead
+  $PY -m naukri_bot portal wellfound --max 15 &
   wait
   # 3b. recruiter emails with a tailored resume (sends only with GMAIL_APP_PASSWORD set, else writes drafts)
   $PY -m naukri_bot outreach --send --max 8
@@ -56,7 +58,7 @@ if lines:
     # already submitted or possibly submitted
     open("output/cycles/top-new.txt", "w").write("\n".join(lines) + "\n")
     subprocess.run([".venv/bin/python", "-m", "naukri_bot", "company-apply", "--file", "output/cycles/top-new.txt",
-                    "--submit", "--no-wait", "--browser-profile", "ats-profile-cycle"])
+                    "--submit", "--no-wait", "--browser-profile", os.environ.get("ATS_PROFILE", "ats-profile-cycle")])
 EOF
   echo "=== done $(date)"
 } >> "$LOG" 2>&1

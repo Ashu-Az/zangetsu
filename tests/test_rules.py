@@ -1,3 +1,5 @@
+import pytest
+
 from naukri_bot.rules import rule_answer
 
 P = {"notice_period_days": 15, "current_ctc_lpa": 7.5, "expected_ctc_lpa": 14, "total_experience_years": 2,
@@ -323,3 +325,22 @@ def test_total_experience_in_months_is_all_of_it():
     f = lambda q: (lambda r: r and r.answer_text)(rule_answer(q, [], "text", p))
     assert f("Total Experience (Months) *") == "24"
     assert f("Additional months of experience") == "0"
+
+
+@pytest.mark.parametrize("q,opts,expect", [
+    # Workday application questions that stalled forms on 28 Oct 2026 (Barclays, ABC Financial)
+    ("Are you involved in any Legal proceedings?", ["Select One", "Yes", "No"], 2),
+    ("Have you ever been subject to investigation by or disciplined/cautioned by a regulatory body?", ["Select One", "Yes", "No"], 2),
+    ("Do you currently reside within India?", ["Select One", "Yes", "No"], 1),
+    ("Have you been employed within the last 24 months by the Barclays Group Statutory Auditor, KPMG?", ["Select One", "Yes", "No"], 2),
+    ("This is a hybrid role, requiring working from our Hyderabad office 2-3x a week, do you have any concerns with this work arrangement?", ["Select One", "Yes", "No"], 2),
+    ("Do you have the legal right to perform this role in India?", ["Yes", "No"], 0),
+    ("Is your right to work based (either now or in the future) on a visa or sponsorship?", ["Yes", "No"], 1),
+])
+def test_workday_questions_28_oct(q, opts, expect):
+    r = rule_answer(q, opts, "dropdown", dict(P, no_legal_issues=True, work_authorized_in="India"))
+    assert r and r.selected_option_indices == [expect]
+
+
+def test_soonest_start_is_immediate():
+    assert rule_answer("What is the soonest you would be able to start?", [], "text", P).answer_text == "Immediately"

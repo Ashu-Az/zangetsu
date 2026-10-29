@@ -104,6 +104,7 @@ class Portal:
             if any(k in card.title.lower() for k in extra):
                 tracker.mark_seen(self._tid(card.job_id), "portal_title_filtered"); stats["skipped"] += 1; continue
             if title_excluded(card.title, self.profile) or not title_included(card.title, self.profile) or company_excluded(card.company, self.profile):
+                log.info("[%s] title filtered: %s — %s", self.name, card.title[:60], card.company[:25])
                 tracker.mark_seen(self._tid(card.job_id), "title_or_company_filtered"); stats["skipped"] += 1; continue
             if too_old(card.posted, self.settings):
                 tracker.mark_seen(self._tid(card.job_id), "too_old"); stats["skipped"] += 1; continue

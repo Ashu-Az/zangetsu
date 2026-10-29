@@ -31,7 +31,8 @@ POSTS_CSV = LEADS_DIR / "linkedin_posts.csv"
 COLUMNS = ["found_at", "post_age", "author", "author_url", "author_is_person", "role", "experience", "emails",
            "apply_links", "india_hint", "resume", "key", "text"]
 
-POST = "[data-view-name='feed-full-update']"
+# LinkedIn's 22 Oct 2026 layout has hashed class names; a post is a list item whose componentkey starts "update-card"
+POST = "[data-view-name='feed-full-update'], div[role='listitem'][componentkey^='update-card']"
 EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 # recruiters often obfuscate: "hr [at] acme [dot] com", "careers(at)acme.com", "jobs at acme dot in"
 _AT = r"\s*(?:@|\[at\]|\(at\)|\{at\}|\s at\s)\s*"

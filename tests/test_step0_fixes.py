@@ -226,7 +226,10 @@ def test_naukri_match_score_filter_and_order():
     assert eligibility(weak, ApplyMode.NAUKRI, s, prof) == "no_match_tick:keyskills"
     assert eligibility(strong, ApplyMode.NAUKRI, s, prof) is None
     assert eligibility(unknown, ApplyMode.NAUKRI, s, prof) is None
-    assert sorted([unknown, strong], key=lambda j: sort_key(j, s))[0] is strong          # 4 ticks beat fewer applicants
+    assert sorted([unknown, strong], key=lambda j: sort_key(j, s))[0] is unknown         # fewest applicants first (Ashu, 22 Oct 2026)
+    fresh = JobPosting(job_id="4", url="u", title="AI Engineer", applicants=40, posted="2 hours ago")
+    stale = JobPosting(job_id="5", url="u", title="AI Engineer", applicants=40, posted="20 hours ago")
+    assert sorted([stale, fresh], key=lambda j: sort_key(j, s))[0] is fresh              # same count: the freshest first
 
 
 def test_months_nationality_qualification():

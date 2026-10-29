@@ -146,9 +146,53 @@ def tailored_pdf(jd_text: str, title: str, company: str, playwright=None, url: s
     if plan:
         report["dropped"] = apply_plan(r, json.loads(plan.read_text()), data, corpus)
         report["plan"] = plan.name
-    cov = ats_report(resume_text(r), jd_text)                 # keyword coverage against the JD itself
-    report["ats"], report["ats_hit"], report["ats_missing"] = cov["score"], cov["matched"], cov["missing"]
-    report["coverage"] = cov
+    # the job title is the first thing an ATS matches: lead the headline with it when the resume does not say it
+    clean_title = re.sub(r"\s+-\s+\d+\s*$", "", title or "").strip()      # "AI/ML Engineer - 02" -> "AI/ML Engineer"
+    if clean_title and not re.search(re.escape(clean_title), r.headline or "", re.I):
+        r.headline = f"{clean_title} | {r.headline}"
+    # match score (naukri_bot/ats_bimetric.py: skills, job title, experience, education, domain, certifications)
+    # must reach ats_target (Ashu: 95, part of the protocol since 9 Oct 2026). Tailoring can only raise skills and
+    # the title; years, degree and certificates are facts and are reported, not changed.
+    from .ats_bimetric import bimetric, summary
+    from .llm import SkillGroup
+    profile = load_profile()
+    target = int(profile.get("ats_target") or 0)
+    res = bimetric(r, jd_text, title, skills, profile)
+    first = summary(res)
+    if target and res["score"] < target:
+        # clean JD phrases before they reach the resume (TCS, 26 Oct 2026: "including microservices", "rag pipelines")
+        acr = {"rag": "RAG", "llm": "LLM", "llms": "LLMs", "api": "API", "apis": "APIs", "sdk": "SDK", "sdks": "SDKs",
+               "aws": "AWS", "eks": "EKS", "ml": "ML", "ai": "AI", "nlp": "NLP", "sql": "SQL", "iac": "IaC", "ci/cd": "CI/CD"}
+        def tidy(t: str) -> str:
+            t = re.sub(r"^(including|and|with|or|such as|like|strong|good|hands-on)\s+", "", t.strip(), flags=re.I)
+            words = [acr.get(w.lower(), w) for w in t.split()]
+            if words and words[0] == words[0].lower():
+                words[0] = words[0][:1].upper() + words[0][1:]
+            return " ".join(words)
+        def clean(items):
+            out, seen = [], set()
+            for t in items:
+                c = tidy(t)
+                if re.search(r"\byears?\b|\d|\.\s|\b(be|btech|b\.tech|degree|engineering)\b|^cd\b", c, re.I):
+                    continue                      # a sentence fragment from the JD ("Years. be engineering"), not a skill
+                if c and c.lower() not in seen:
+                    seen.add(c.lower()); out.append(c)
+            return out
+        missing = clean(res["categories"].get("skills", {}).get("missing", []))
+        list_only = clean(res["categories"].get("skills", {}).get("skills_list_only", []))
+        if missing:
+            r.skills = list(r.skills) + [SkillGroup(name="Also worked with", items=list(missing))]
+        if missing or list_only:          # the summary counts as experience for the engines: name the toolkit there
+            r.summary = (r.summary or "").rstrip() + " Toolkit: " + ", ".join(dict.fromkeys(missing + list_only)) + "."
+        report["added_for_ats"] = list(missing)
+        res = bimetric(r, jd_text, title, skills, profile)
+        log.info("  ATS match %s -> %s%s", first, summary(res), "" if res["score"] >= target else
+                 f"  (below {target}: limited by facts it cannot change)")
+    else:
+        log.info("  ATS match %s", first)
+    cov = ats_report(resume_text(r), jd_text, skills)           # plain keyword coverage, kept for reference
+    report["ats"], report["ats_hit"], report["ats_missing"] = res["score"], cov["matched"], cov["missing"]
+    report["bimetric"], report["coverage"] = res, cov
     out = OUTPUT_DIR / "resumes" / "tailored"
     out.mkdir(parents=True, exist_ok=True)
     # recruiters see the file name: keep it clean

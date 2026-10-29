@@ -57,7 +57,7 @@ USER_MESSAGES = ".chatbot_ListItem .userMsg .msg, .chatbot_ListItem.userItem .ms
 RADIO_CONTAINER = ".singleselect-radiobutton-container, [class*='singleselect-radiobutton']"
 RADIO_INPUT = ".ssrc__radio, input[type='radio']"
 RADIO_LABEL = ".ssrc__label, label"
-CHECKBOX_CONTAINER = ".multiselect-checkbox-container, [class*='multiselect-checkbox']"
+CHECKBOX_CONTAINER = ".multiselect-checkbox-container, [class*='multiselect-checkbox'], .multicheckboxes-container"
 CHECKBOX_INPUT = ".mcc__checkbox, input[type='checkbox']"
 CHECKBOX_LABEL = ".mcc__label, label"
 SUGGESTOR_INPUT = ".chatbot_Drawer input[type='text'], [class*='suggestor'] input, [class*='ssc__input']"

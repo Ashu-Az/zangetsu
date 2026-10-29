@@ -28,3 +28,10 @@ inputs/
 profile/confirmed_facts.md
 profile/*.bak*
 profile/*.yaml.bak*
+
+# One-off job/company URL lists, ad-hoc run scripts and logs at the repo root (may hold personal data)
+/*.txt
+/cl-*.sh
+logs/
+*.bak
+.DS_Store

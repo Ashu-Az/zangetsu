@@ -258,3 +258,21 @@ def test_position_applying_for_text_gets_the_role(label):
     g = applier()
     g.role = "AI/ML Engineer"
     assert g._question_value(label) == "AI/ML Engineer"
+
+
+def test_workday_disability_group_with_generic_label():
+    # PayPal (26 Oct 2026): the disability checkbox group is labelled only "Please check one of the boxes below:"
+    opts = ["I DON'T WISH TO ANSWER (India)", "NO. I DON'T HAVE A DISABILITY (India)",
+            "YES, I HAVE A DISABILITY (or previously had a disability) (India)"]
+    assert workday(disability=False)._choice_for("Please check one of the boxes below:", opts) == 1
+    assert workday(disability=False)._choice_for("Please check one of the boxes below:", ["Red", "Blue"]) is None
+
+
+def test_workday_younger_than_18():
+    assert workday()._choice_for("Are you younger than 18 years old?", ["Yes", "No"]) == 1
+
+
+def test_workday_how_heard_career_site():
+    # Cigna (29 Oct 2026): no job-board option, only Agency / Career Site / Recruiter / Referred by Employee
+    opts = ["Select One", "Agency", "Career Site", "Recruiter", "Referred by Employee"]
+    assert workday(how_heard=[])._choice_for("How Did You Hear About Us?", opts) == 2

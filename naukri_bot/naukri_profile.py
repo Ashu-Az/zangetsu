@@ -175,8 +175,11 @@ def run(browser, sections: list[str], new_only: bool = False) -> dict[str, bool]
     if "resume" in sections:
         results["resume"] = upload_resume(page, content.get("resume_file", ""))
     if "itskills" in sections:
-        for k, v in update_it_skills(page, content.get("it_skills", [])).items():
-            results[f"itskill:{k}"] = v
+        try:
+            for k, v in update_it_skills(page, content.get("it_skills", [])).items():
+                results[f"itskill:{k}"] = v
+        except SectionMissing:
+            results["itskills"] = False
     if "accomplishments" in sections:
         for k, v in update_online_profiles(page, content.get("online_profiles", [])).items():
             results[f"online:{k}"] = v
@@ -211,6 +214,10 @@ def _open_entry_form(page, click_locator, form_marker: str):
 # ---------------------------------------------------------------------------
 # Employment
 # ---------------------------------------------------------------------------
+class SectionMissing(Exception):
+    pass
+
+
 def _scroll_to_load(page, section_id: str) -> None:
     for _ in range(12):
         loc = page.locator(f"#{section_id}")
@@ -218,7 +225,12 @@ def _scroll_to_load(page, section_id: str) -> None:
             break
         page.mouse.wheel(0, 700)
         time.sleep(0.5)
-    page.locator(f"#{section_id}").scroll_into_view_if_needed()
+    try:
+        page.locator(f"#{section_id}").scroll_into_view_if_needed(timeout=8000)
+    except Exception:
+        # the section never rendered (23 Oct 2026: #lazyITSkills missing): skip instead of crashing the cycle step
+        log.warning("profile section #%s did not load; skipping it this run", section_id)
+        raise SectionMissing(section_id)
     pause(0.5, 1.0)
 
 
