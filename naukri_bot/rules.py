@@ -603,7 +603,7 @@ def rule_answer(question: str, options: list[str], kind: str, profile: dict) -> 
             return _answer(options[i], i, options)
 
     # "Have you completed <X> Professional Certificate?" (Fractal Workday, 29 Oct 2026): No unless the profile lists it
-    m_cert = re.search(r"(completed|hold|have|earned|obtained)\b.{0,40}\b([\w .&+-]{3,60}?)\s*(professional )?(certificate|certification)", q)
+    m_cert = re.search(r"(completed|hold|have|earned|obtained)\b.{0,40}\b([\w .&+-]{3,60}?)\s*(professional )?(certificate|certification|program(me)?|course|bootcamp|nanodegree)\b", q)
     if has_opts and m_cert:
         certs = " ".join(str(c) for c in (profile.get("certifications") or [])).lower()
         name = m_cert.group(2).strip().lower()
