@@ -264,22 +264,74 @@ def build_message(lead: Lead, profile: dict, sender: str, subject: str, body: st
 
 
 # ------------------------------------------------------------------ run
+def mail_app_ready(address: str) -> bool:
+    """True when macOS Mail has an account with this address (so it can send as the candidate)."""
+    import subprocess
+    if not address:
+        return False
+    try:
+        out = subprocess.run(["osascript", "-e", 'tell application "Mail" to get email addresses of every account'],
+                             capture_output=True, text=True, timeout=30).stdout
+    except Exception:
+        return False
+    return address.lower() in out.lower()
+
+
+def send_with_mail_app(sender: str, to: str, subject: str, body: str, pdf: Path, wait_s: int = 90) -> bool:
+    """Send one email through macOS Mail (plain-text body, resume attached) and wait until it leaves the Outbox."""
+    import subprocess, tempfile
+    tmp = Path(tempfile.mkdtemp())
+    (tmp / "body.txt").write_text(body, encoding="utf-8")
+    att = tmp / ("Ashu_Azad_Resume.pdf" if "ashu" in pdf.name.lower() else pdf.name)
+    att.write_bytes(pdf.read_bytes())
+    esc = lambda v: v.replace("\\", "\\\\").replace('"', '\\"')   # noqa: E731
+    script = f'''
+set bodyText to (read POSIX file "{tmp / 'body.txt'}" as «class utf8»)
+tell application "Mail"
+  set m to make new outgoing message with properties {{subject:"{esc(subject)}", content:bodyText, visible:false, sender:"{esc(sender)}"}}
+  tell m
+    make new to recipient at end of to recipients with properties {{address:"{esc(to)}"}}
+    make new attachment with properties {{file name:(POSIX file "{att}")}} at after the last paragraph
+  end tell
+  delay 3
+  send m
+end tell'''
+    try:
+        r = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=60)
+        if r.returncode != 0:
+            log.warning("  Mail.app error: %s", r.stderr.strip()[:200]); return False
+        for _ in range(wait_s // 3):
+            n = subprocess.run(["osascript", "-e", 'tell application "Mail" to get count of messages of outbox'],
+                               capture_output=True, text=True, timeout=20).stdout.strip()
+            if n == "0":
+                return True
+            time.sleep(3)
+    except Exception as e:
+        log.warning("  Mail.app send failed: %s", e)
+    return False
+
+
 def run(settings: Settings, profile: dict, send: bool, max_n: int, sources: list[str], playwright=None) -> list[dict]:
     from .tailor_rules import tailored_pdf
     tracker = Tracker()
-    cap = int(os.getenv("OUTREACH_DAILY_CAP", "15"))
+    cap = int(os.getenv("OUTREACH_DAILY_CAP", "25"))
     sent_today = sum(1 for e in _sent().values() if e.get("at", "").startswith(datetime.now().date().isoformat()))
     budget = max(0, min(max_n, cap - sent_today)) if send else max_n
     leads = select(settings, profile, tracker, sources, budget)
     log.info("outreach: %d lead(s) selected (sent today %d, daily cap %d)", len(leads), sent_today, cap)
     sender, password = os.getenv("GMAIL_ADDRESS", "").strip(), os.getenv("GMAIL_APP_PASSWORD", "").replace(" ", "")
+    via_mail_app = False
     if send and not (sender and password):
-        log.error("Set GMAIL_ADDRESS and GMAIL_APP_PASSWORD in .env to send (writing drafts instead).")
-        send = False
+        # no App Password: send through macOS Mail with the candidate's Gmail account (Ashu, 29 Oct 2026)
+        if mail_app_ready(profile.get("email", "")):
+            via_mail_app, sender = True, profile.get("email", "")
+        else:
+            log.error("Set GMAIL_ADDRESS and GMAIL_APP_PASSWORD in .env (or add the Gmail account to Mail) to send; writing drafts instead.")
+            send = False
     day_dir = OUT_DIR / datetime.now().strftime("%Y-%m-%d")
     day_dir.mkdir(parents=True, exist_ok=True)
     smtp = None
-    if send:
+    if send and not via_mail_app:
         smtp = smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=60)
         smtp.login(sender, password)
     results = []
@@ -288,7 +340,7 @@ def run(settings: Settings, profile: dict, send: bool, max_n: int, sources: list
             pdf, rep = tailored_pdf(lead.jd, lead.title, lead.company, playwright=playwright, url=lead.url or lead.email,
                                     compact=True)
             coverage = rep.get("coverage") or {"matched": rep.get("ats_hit", [])}
-            min_cov = int(os.getenv("OUTREACH_MIN_COVERAGE", "60"))
+            min_cov = int(os.getenv("OUTREACH_MIN_COVERAGE", "70"))   # Ashu: ATS score should be high (29 Oct 2026)
             if rep.get("ats") is not None and float(rep["ats"]) < min_cov:
                 log.info("  skipped (keyword coverage %s%% < %d%%): %s | %s", rep["ats"], min_cov, lead.title[:40], lead.company[:25])
                 results.append({"email": lead.email, "title": lead.title, "company": lead.company, "status": "skipped_low_match",
@@ -301,7 +353,14 @@ def run(settings: Settings, profile: dict, send: bool, max_n: int, sources: list
             eml.write_bytes(bytes(msg))
             status = "drafted"
             if send:
-                smtp.send_message(msg)
+                if via_mail_app:
+                    if not send_with_mail_app(sender, lead.email, subject, body, Path(pdf)):
+                        log.warning("  Mail.app did not send to %s; left as a draft", lead.email)
+                        results.append({"email": lead.email, "title": lead.title, "company": lead.company, "status": "drafted",
+                                        "eml": str(eml), "pdf": str(pdf), "coverage": rep.get("ats"), "subject": subject})
+                        continue
+                else:
+                    smtp.send_message(msg)
                 status = "emailed"
                 sent = _sent()
                 sent[lead.email] = {"at": datetime.now().isoformat(timespec="seconds"), "title": lead.title,
