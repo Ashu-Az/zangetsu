@@ -31,7 +31,9 @@ POSTS_CSV = LEADS_DIR / "linkedin_posts.csv"
 COLUMNS = ["found_at", "post_age", "author", "author_url", "author_is_person", "role", "experience", "emails",
            "apply_links", "india_hint", "resume", "key", "text"]
 
-POST = "[data-view-name='feed-full-update']"
+# LinkedIn's search results (29 Oct 2026): each post is a div[role=listitem] with a componentkey attribute;
+# the older layout used data-view-name='feed-full-update'
+POST = "[data-view-name='feed-full-update'], div[role='listitem'][componentkey]"
 EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 # recruiters often obfuscate: "hr [at] acme [dot] com", "careers(at)acme.com", "jobs at acme dot in"
 _AT = r"\s*(?:@|\[at\]|\(at\)|\{at\}|\s at\s)\s*"
@@ -132,7 +134,7 @@ def collect(page, queries: list[str], profile: dict, scrolls: int = 4) -> list[d
     empty_streak = 0
     for q in queries:
         url = ("https://www.linkedin.com/search/results/content/?keywords=" + quote(q)
-               + "&datePosted=%22past-24h%22&sortBy=%22date_posted%22")
+               + "&datePosted=%22past-week%22&sortBy=%22date_posted%22")
         try:
             page.goto(url, wait_until="domcontentloaded", timeout=60000)
             time.sleep(random.uniform(5, 7))
@@ -165,7 +167,7 @@ def collect(page, queries: list[str], profile: dict, scrolls: int = 4) -> list[d
                 const name = Array.from(p.querySelectorAll('a[href*="/in/"], a[href*="/company/"]'))
                                   .map(x => x.innerText.trim()).find(t => t) || '';
                 const txt = p.innerText || '';
-                const age = (txt.match(/\\n(now|\\d+\\s?[mhdw]|\\d+\\s?(?:min|hr|hour|day)s?)\\s?•/) || [, ''])[1];
+                const age = (txt.match(/\\n(now|\\d+\\s?[mhdw]|\\d+\\s?(?:min|hr|hour|day)s?)\\s?(?:•|\\n)/) || [, ''])[1];
                 return {author: name.split('\\n')[0], url: a ? a.href.split('?')[0] : '', age: age, text: txt};
             })""", POST)
         except Exception as e:
