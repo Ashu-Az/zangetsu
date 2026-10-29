@@ -50,7 +50,13 @@ def extract_emails(text: str) -> list[str]:
         cand = f"{user}@{host}.{tld}".lower().rstrip(".")
         if EMAIL.fullmatch(cand) and not NOT_EMAIL_HOSTS.search(cand) and not re.fullmatch(r"\d+@.*", cand):
             found.add(cand)
-    return sorted(e for e in found if not NOT_EMAIL_HOSTS.search(e.split("@")[1]))
+    # a word glued after the TLD by LinkedIn's line joins ("harsha.k@stackhire.ai.follow", "x@gmail.com.m",
+    # "y@co.in.fee", 29 Oct 2026): keep the address up to its real top-level domain
+    clean = set()
+    for e in found:
+        m = re.match(r"^(.+?@[\w.-]+?\.(?:com|in|co\.in|ai|io|net|org|dev|tech|co|us|uk|biz|info|app|cloud|global))(?:\.[a-z]+)?$", e)
+        clean.add(m.group(1) if m else e)
+    return sorted(e for e in clean if not NOT_EMAIL_HOSTS.search(e.split("@")[1]))
 INDIA = re.compile(r"\b(india|indian|bengaluru|bangalore|hyderabad|pune|mumbai|delhi|ncr|gurugram|gurgaon|noida|chennai|"
                    r"kolkata|ahmedabad|jaipur|kochi|indore|chandigarh|lpa|lakhs?)\b|₹|remote\s*\(?india", re.I)
 # Roles the candidate targets (no bare "data ... engineer": data engineering is a different job)

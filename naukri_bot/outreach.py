@@ -194,7 +194,8 @@ def select(settings: Settings, profile: dict, tracker: Tracker, sources: list[st
         years = float(settings.experience_years) if settings.experience_years else None
         # a cold email needs a closer fit than a one-click apply: the role's minimum must not exceed the candidate's
         # years (Eucloid, 12 Oct 2026: a 3-7 yr role answered a 2-yr email with "experience does not closely align")
-        if not reason and lead.experience and not lead.posting().experience_fits(years, slack=0):
+        # slack 1 (Ashu, 29 Oct 2026: send a lot): a "3+ years" role is still worth one email; 4+ is not
+        if not reason and lead.experience and not lead.posting().experience_fits(years, slack=1):
             reason = f"experience_too_far_for_email:{lead.experience}"
         if not reason and lookalike_domain(lead.email, lead.company):
             reason = f"lookalike_domain:{lead.domain}"
