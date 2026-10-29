@@ -190,7 +190,9 @@ def tailored_pdf(jd_text: str, title: str, company: str, playwright=None, url: s
         candidates = clean(res["categories"].get("skills", {}).get("missing", []))
         # merge note (29 Oct 2026): the other machine's branch added every missing JD skill; the grounded-only rule
         # stays - skills Ashu does not have are reported (ats_ungrounded), not written into the resume
-        missing = [k for k in candidates if grounded(k)]
+        # ats_pad_ungrounded (profile; Ashu chose it on 29 Oct 2026 after being told the interview risk): add every
+        # missing JD skill like the other machine did. Off, only skills Ashu has are added.
+        missing = list(candidates) if profile.get("ats_pad_ungrounded") else [k for k in candidates if grounded(k)]
         list_only = clean(res["categories"].get("skills", {}).get("skills_list_only", []))
         if missing:
             r.skills = list(r.skills) + [SkillGroup(name="Also worked with", items=list(missing))]

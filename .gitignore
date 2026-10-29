@@ -35,3 +35,4 @@ profile/*.yaml.bak*
 logs/
 *.bak
 .DS_Store
+backup-local-*/
