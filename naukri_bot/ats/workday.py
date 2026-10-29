@@ -350,6 +350,12 @@ class WorkdayApplier:
 
     def _create_account(self) -> None:
         pg = self.pg
+        # Ashu's rule (docs/NEW-MACHINE-GUIDE.md): never create accounts on his behalf. Signing in to an account he
+        # already has is fine; a site with no account is left for him (profile workday_create_accounts: true to allow).
+        if not self.profile.get("workday_create_accounts"):
+            log.info("  no Workday account on this site: left for Ashu to create (not creating one on his behalf)")
+            self.result.notes = "needs a Workday account: create it yourself, then rerun"
+            return
         log.info("  creating a Workday account for %s", self.email)
         self._created_at = time.time()
         pg.locator(A("email")).first.fill(self.email)
