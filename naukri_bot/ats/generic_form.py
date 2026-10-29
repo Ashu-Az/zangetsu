@@ -92,6 +92,7 @@ CONSENT_OK = re.compile(
     # "Cyepro may store my application and CV for 12 months to consider me for jobs" (19 Oct 2026)
     r"store (my|your) (application|cv|resume|details|data|information)|consider me for (future )?(jobs|roles|openings)|"
     r"(may|to|can) (store|keep|hold) my (application|cv|resume|data|details)|"            # Cyepro (21 Oct 2026)
+    r"(data|information) (will|may|shall) be (processed|used|handled)|"          # Onit Lever (29 Oct 2026)
     r"(point of |cross[- ]border )?data transfer|transfer of (my |your )?(personal )?(data|information)|"   # Lynx (13 Oct 2026)
     # "how my information will be processed / used" (Visa Workday, 14 Oct 2026)
     r"how (my|your) (personal )?(data|information) (will be|is|are) (processed|used|handled|stored|collected)|"
