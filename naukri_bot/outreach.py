@@ -377,12 +377,10 @@ def run(settings: Settings, profile: dict, send: bool, max_n: int, sources: list
     sender, password = os.getenv("GMAIL_ADDRESS", "").strip(), os.getenv("GMAIL_APP_PASSWORD", "").replace(" ", "")
     via_mail_app = False
     if send and not (sender and password):
-        # no App Password: send through macOS Mail with the candidate's Gmail account (Ashu, 29 Oct 2026)
-        if mail_app_ready(profile.get("email", "")):
-            via_mail_app, sender = True, profile.get("email", "")
-        else:
-            log.error("Set GMAIL_ADDRESS and GMAIL_APP_PASSWORD in .env (or add the Gmail account to Mail) to send; writing drafts instead.")
-            send = False
+        # never Apple Mail (Ashu, NEW-MACHINE-GUIDE): without an App Password, write drafts and send them through
+        # Gmail's web UI with tools/gmail_web_send.py
+        log.error("No GMAIL_APP_PASSWORD: writing drafts; send them with tools/gmail_web_send.py %s", OUT_DIR)
+        send = False
     day_dir = OUT_DIR / datetime.now().strftime("%Y-%m-%d")
     day_dir.mkdir(parents=True, exist_ok=True)
     smtp = None
