@@ -110,7 +110,10 @@ def apply_card(b, card: dict, handler_factory) -> str:
         handler = handler_factory(_posting(card))
         res = handler.run()
         log.info("    answered %d question(s)", len(res.answered))
-    if _wait_for(pg, r"Successfully applied", 25) and pg.inner_text("body").count("Successfully applied") > before:
+    # the confirmation must name this company and be among the newest messages: older chat history loading in
+    # raised the plain "Successfully applied" count and logged Tuteck as applied when it was not (30 Oct 2026)
+    co = re.escape(card["company"][:25])
+    if _wait_for(pg, r"Successfully applied to\s*" + co, 25, tail=2500) and pg.inner_text("body").count("Successfully applied") > before:
         return "applied"
     b.save_debug("neo-not-confirmed")
     return "failed:no 'Successfully applied' message"
