@@ -999,6 +999,7 @@ class GenericFormApplier:
                 continue
             ans = rule_answer(g["q"].rstrip("*: "), ["Yes", "No"], "radio", self.profile)
             pick = ans.answer_text if ans and ans.selected_option_indices else None
+            pick = pick or self._llm_value(g["q"], ["Yes", "No"])
             if pick is None:
                 if "*" in g["q"]:
                     self._unknown(g["q"], ["Yes", "No"])
@@ -1040,6 +1041,7 @@ class GenericFormApplier:
                     self._unknown(q, labels); continue
                 pick = next((l for l in labels if re.search(r"acknowledge|agree|accept|consent|confirm|^yes|understand", l, re.I)), None) \
                        or (labels[0] if len(labels) == 1 else None)
+            pick = pick or self._llm_value(q, labels)
             if pick is None:
                 if "*" in q:
                     self._unknown(q, labels)
@@ -1054,7 +1056,19 @@ class GenericFormApplier:
                     loc.check(force=True)
                 self._note(q, pick, "rules")
             except Exception as e:
-                log.warning("    checkbox error: %s", str(e)[:100]); self._unknown(q, labels)
+                # an overlay can swallow every click (Full Stack Developer careers page, 31 Oct 2026): tick it by script
+                try:
+                    sel = f"[id='{b['id']}']" if b["id"] else f"input[type='checkbox'][name='{b['name']}']"
+                    ok = self.pg.evaluate("""s => { const e = document.querySelector(s); if (!e) return false;
+                        if (!e.checked) e.click(); if (!e.checked) { e.checked = true;
+                        e.dispatchEvent(new Event('input', {bubbles: true})); e.dispatchEvent(new Event('change', {bubbles: true})); }
+                        return e.checked; }""", sel)
+                except Exception:
+                    ok = False
+                if ok:
+                    self._note(q, pick, "rules (script tick)")
+                else:
+                    log.warning("    checkbox error: %s", str(e)[:100]); self._unknown(q, labels)
 
     def _pick(self, label: str, options: list[str]) -> str | None:
         if not options:
