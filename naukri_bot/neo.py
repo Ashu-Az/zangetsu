@@ -63,13 +63,26 @@ def _click_text(pg, text: str, timeout: int = 5000) -> bool:
     return False
 
 
-def _wait_for(pg, rx: str, timeout_s: float = 25, tail: int = 0) -> str | None:
+def _after_old_confirmation(text: str, card: dict) -> str:
+    """Drop everything up to the last confirmation unless it is this card's: Turing's "Successfully applied" sat above
+    Aiwf's "Add missing details", so Aiwf's questions were never opened and Aron stuck behind them (31 Oct 2026)."""
+    hits = list(re.finditer(r"Successfully applied to", text))
+    if not hits:
+        return text
+    rest = text[hits[-1].end():]
+    who = re.escape(card["company"][:25]) + "|" + re.escape(card["title"][:30])
+    return text if re.match(r"[\s\S]{0,300}?(" + who + ")", rest, re.I) else rest
+
+
+def _wait_for(pg, rx: str, timeout_s: float = 25, tail: int = 0, card: dict | None = None) -> str | None:
     """First match of rx in the page; with tail, only in the last `tail` characters (the newest chat messages,
-    so an older card's "Apply now" further up does not count: PwC, 30 Oct 2026)."""
+    so an older card's "Apply now" further up does not count: PwC, 30 Oct 2026); with card, only after the last
+    confirmation that is not this card's."""
     end = time.time() + timeout_s
     while time.time() < end:
         body = pg.inner_text("body")
-        m = re.search(rx, body[-tail:] if tail else body, re.I)
+        text = body[-tail:] if tail else body
+        m = re.search(rx, _after_old_confirmation(text, card) if card else text, re.I)
         if m:
             return m.group(0)
         time.sleep(1.5)
@@ -92,11 +105,11 @@ def apply_card(b, card: dict, handler_factory) -> str:
             return "failed:already applied"
         b.save_debug("neo-no-apply")
         return "failed:no Apply now (" + tail[-120:] + ")"
-    step = _wait_for(pg, r"Tailor Resume first|Apply with original Resume|Add missing details|Successfully applied", 20, tail=1500)
+    step = _wait_for(pg, r"Tailor Resume first|Apply with original Resume|Add missing details|Successfully applied", 20, tail=1500, card=card)
     if step and "Tailor Resume first" in step:
         _click_text(pg, "Tailor Resume first ✨") or _click_text(pg, "Tailor Resume first")
         # Neo writes the tailored resume, then offers to apply with it
-        nxt = _wait_for(pg, r"Apply with (tailored|customi[sz]ed|updated|new) Resume|Add missing details|Successfully applied", 90, tail=1500)
+        nxt = _wait_for(pg, r"Apply with (tailored|customi[sz]ed|updated|new) Resume|Add missing details|Successfully applied", 90, tail=1500, card=card)
         if nxt and re.match(r"Apply with", nxt):
             _click_text(pg, nxt)
         elif nxt is None:
@@ -104,7 +117,7 @@ def apply_card(b, card: dict, handler_factory) -> str:
             _click_text(pg, "Apply with original Resume")
     elif step and "original" in step:
         _click_text(pg, "Apply with original Resume")
-    step = _wait_for(pg, r"Add missing details|Successfully applied", 30, tail=1500)
+    step = _wait_for(pg, r"Add missing details|Successfully applied", 30, tail=1500, card=card)
     if step and "Add missing details" in step:
         _click_text(pg, "Add missing details"); time.sleep(4)
         handler = handler_factory(_posting(card))
