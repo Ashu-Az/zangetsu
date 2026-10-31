@@ -38,6 +38,17 @@ class QuestionAnswer(BaseModel):
     confidence: float = Field(ge=0, le=1)
 
 
+class FormFieldAnswer(BaseModel):
+    index: int = Field(description="The question's [index] in the list.")
+    answer_text: str = Field(default="", description="Text to type (free-text questions).")
+    option: str = Field(default="", description="For questions with OPTIONS: the exact option text to choose.")
+    skip: bool = Field(default=False, description="True when the profile gives no truthful answer, or it needs a signature or legal attestation.")
+
+
+class FormAnswers(BaseModel):
+    answers: list[FormFieldAnswer]
+
+
 class SkillGroup(BaseModel):
     name: str
     items: list[str]
@@ -241,6 +252,30 @@ class LLM:
                      ("\u201c", '"'), ("\u201d", '"'), ("\u202f", " "), ("\u00a0", " ")):
             ans.answer_text = ans.answer_text.replace(a, b)
         return ans
+
+    def answer_form(self, questions: list[dict], role: str, page_text: str) -> list["FormFieldAnswer"]:
+        """Every question the rules could not answer on one application form, answered together in one call so the
+        answers agree with each other and with the job (Ashu, 31 Oct 2026: read the whole form first, then answer)."""
+        lines = []
+        for i, q in enumerate(questions):
+            opts = f"  OPTIONS: {q['options']}" if q.get("options") else ""
+            lines.append(f"[{i}] {q['label']}{opts}")
+        user = "\n\n".join([
+            f"ROLE: {role}",
+            "JOB / APPLICATION PAGE TEXT (trimmed):\n" + page_text[:2500],
+            "This is an employer's own application form (not Naukri). The fields below are every question on it that "
+            "the profile rules could not answer. Read them all first, then answer each one, keeping the answers "
+            "consistent with each other and with the job. For a question with OPTIONS, put the exact option text in "
+            "`option`. Set skip=true for anything that needs a signature, a legal attestation, or a fact the profile "
+            "and resume do not support.",
+            "QUESTIONS:\n" + "\n".join(lines),
+        ])
+        out = self._parse(self._answer_system, user, FormAnswers, effort="medium", max_tokens=8000)
+        for a in out.answers:
+            for x, y in (("‑", "-"), ("‐", "-"), ("–", "-"), ("—", ", "), ("’", "'"), ("‘", "'"),
+                         ("“", '"'), ("”", '"'), (" ", " "), (" ", " ")):
+                a.answer_text, a.option = a.answer_text.replace(x, y), a.option.replace(x, y)
+        return out.answers
 
     def tailor_resume(self, job: JobPosting) -> TailoredResume:
         user = "JOB POSTING:\n" + job.to_prompt_text() + "\n\nProduce the tailored resume now."

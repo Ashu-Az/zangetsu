@@ -271,6 +271,54 @@ class GenericFormApplier:
         self._opened: list = []                   # tabs this application opened (closed when it ends)
         self._country_cache: dict[str, str | None] = {}
         self._start_country: str | None = None
+        self.llm_answers: dict[str, FormFieldAnswer] = {}   # label -> the model's answer, from one call per form
+        self._llm_asked = False
+
+    # ------------------------------------------------------------------ model answers for what the rules miss
+    @staticmethod
+    def _key(label: str) -> str:
+        return re.sub(r"[\s*:?]+", " ", label or "").strip().lower()
+
+    def _llm_value(self, label: str, options: list[str]) -> str | None:
+        a = self.llm_answers.get(self._key(label))
+        if not a or a.skip:
+            return None
+        if options:
+            want = (a.option or a.answer_text).strip().lower()
+            if not want:
+                return None
+            return next((o for o in options if o.strip().lower() == want), None) or \
+                   next((o for o in options if o.strip().lower().startswith(want[:12])), None) or \
+                   next((o for o in options if want in o.strip().lower()), None)
+        return a.answer_text.strip() or None
+
+    def ask_model(self) -> int:
+        """Scan first, then answer: every field the rules left empty goes to the model in ONE call with the job page,
+        so the answers fit together (Ashu, 31 Oct 2026). Signatures, NDAs and legal attestations stay with Ashu."""
+        if self._llm_asked:
+            return 0
+        self._llm_asked = True
+        qs = [f for f in self.result.filled if f["source"] == "unknown"]
+        qs = [f for f in qs if not self._needs_person(f["label"].lower())
+              and not re.search(r"\bnda\b|non-?disclosure|signature|sign here|\(a past job's row|company not filled", f["label"], re.I)]
+        if not qs:
+            return 0
+        try:
+            from ..config import Settings, load_resume_markdown
+            from ..llm import LLM
+            llm = LLM(Settings(), self.profile, load_resume_markdown())
+            if not (llm.groq_key or os.getenv("ANTHROPIC_API_KEY", "").strip()):
+                return 0
+            answers = llm.answer_form([{"label": f["label"], "options": f.get("options") or []} for f in qs],
+                                      self.role, self._page_text())
+        except Exception as e:
+            log.warning("    model could not answer the form's open questions: %s", str(e)[:120])
+            return 0
+        for a in answers:
+            if 0 <= a.index < len(qs):
+                self.llm_answers[self._key(qs[a.index]["label"])] = a
+                log.info("    model: %-38s -> %s", qs[a.index]["label"][:38], "(skip)" if a.skip else (a.option or a.answer_text)[:60])
+        return sum(1 for a in self.llm_answers.values() if not a.skip)
 
     # ------------------------------------------------------------------ where the job is
     _PAGE_TEXT_JS = r"""() => {
@@ -441,6 +489,9 @@ class GenericFormApplier:
         ans = rule_answer(label, [], "text", p)
         if ans and ans.answer_text:
             return ans.answer_text, "rules"
+        llm = self._llm_value(label, [])
+        if llm:
+            return llm, "model"
         return None, ""
 
     def _question_value(self, l: str) -> str | None:
@@ -1165,7 +1216,7 @@ class GenericFormApplier:
         if want:
             return next((o for o in options if o.lower() == want.lower()), None) or \
                    next((o for o in options if o.lower().startswith(want.lower()[:5])), None)
-        return None
+        return self._llm_value(label, options)
 
     def _option_loc(self, el):
         """Open list's options: [role=option], or (react-select themes without roles: PyjamaHR's "list__option")
@@ -1447,6 +1498,10 @@ class GenericFormApplier:
         if self.pg.evaluate("""() => [...document.querySelectorAll('input:not([type=hidden]):not([type=file]):not([type=radio]):not([type=checkbox]), textarea, select')]
                  .some(e => e.offsetParent && !e.value && (e.required || e.getAttribute('aria-required') === 'true' || e.closest('[class*=required]')
                       || /\\*/.test((e.labels && e.labels[0] && e.labels[0].innerText) || '')))"""):
+            self.result.filled = [f for f in self.result.filled if f["source"] != "unknown"]
+            self.fill(again=True)
+        # the whole form has been read: send every question still open to the model together, then fill once more
+        if self.ask_model():
             self.result.filled = [f for f in self.result.filled if f["source"] != "unknown"]
             self.fill(again=True)
         visible_captcha = any(e.is_visible() for e in self.pg.locator(
