@@ -49,7 +49,7 @@ Naukri (`python -m naukri_bot login`), LinkedIn, Wellfound, Hirist, and Gmail in
 3. **Naukri search** (capped per run, see section 3) and **Wellfound**, side by side.
 4. **Hirist**: run it too (`python -m naukri_bot portal hirist --max 30`). It does not use Naukri's quota and
    brings 10–20 applications a day.
-5. **Recruiter emails**: draft, proof-read, then **send** (from the candidate's Gmail, never Apple Mail).
+5. **Recruiter emails**: draft, proof-read, then **send** (through Apple Mail, signed in as the candidate's Gmail address; Ashu, 1 Nov 2026).
 6. **Top companies** (Naukri postings of priority companies), **Workday**, Greenhouse / Lever / Ashby boards.
 7. **Company sites**: `scripts/hunt.sh company` fills each employer's own form with a tailored resume.
 8. **LinkedIn**: Easy Apply (`portal linkedin`), then hiring posts (`leads`) and `tools/post_outreach.py` for

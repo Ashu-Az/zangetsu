@@ -376,11 +376,13 @@ def run(settings: Settings, profile: dict, send: bool, max_n: int, sources: list
     log.info("outreach: %d lead(s) selected (sent today %d, daily cap %d)", len(leads), sent_today, cap)
     sender, password = os.getenv("GMAIL_ADDRESS", "").strip(), os.getenv("GMAIL_APP_PASSWORD", "").replace(" ", "")
     via_mail_app = False
-    if send and not (sender and password):
-        # never Apple Mail (Ashu, NEW-MACHINE-GUIDE): without an App Password, write drafts and send them through
-        # Gmail's web UI with tools/gmail_web_send.py
-        log.error("No GMAIL_APP_PASSWORD: writing drafts; send them with tools/gmail_web_send.py %s", OUT_DIR)
-        send = False
+    if send and not password:
+        # Apple Mail is the sender now (Ashu, 1 Nov 2026), and only with the candidate's own account signed in
+        sender = sender or str(profile.get("email", "")).strip()
+        via_mail_app = mail_app_ready(sender)
+        if not via_mail_app:
+            log.error("Apple Mail has no account for %r: writing drafts, nothing is sent", sender)
+            send = False
     day_dir = OUT_DIR / datetime.now().strftime("%Y-%m-%d")
     day_dir.mkdir(parents=True, exist_ok=True)
     smtp = None
