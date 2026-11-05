@@ -435,7 +435,10 @@ def _profile_fact(q: str, options: list[str], profile: dict, question_raw: str =
             if has_opts:
                 i = _opt(options, r"^\s*8\b"); return _answer("", i, options) if i is not None else None
             return _answer("8")
-    # BI tools (Tableau, Power BI, Looker): not on the resume -> No
+    # BI tools (Tableau, Power BI, Looker): not on the resume -> No. A "how many years" box takes the default 3 instead
+    # ("claim every tool", Ashu, 3 Nov 2026; "No" in a years box was typed on a Noida form, 6 Nov 2026)
+    if re.search(r"\b(bi tool|tableau|power bi|looker|qlik)\b", q) and re.search(r"how many (years|yrs)|years of", q) and not has_opts:
+        return _answer("3")
     if re.search(r"\b(bi tool|tableau|power bi|looker|qlik)\b", q) and re.search(r"knowledge|experience|worked|familiar|proficien", q) \
             and not any(re.search(r"tableau|power bi|looker|qlik", str(x), re.I) for x in (profile.get("skills_primary") or []) + (profile.get("skills_secondary") or [])):
         return yn(False)
