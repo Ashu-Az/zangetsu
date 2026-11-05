@@ -26,7 +26,7 @@ free_profile() {
 {
   echo "=== protocol $(date)"
   echo "=== 1. Neo"
-  $PY -m naukri_bot neo --max 8
+  $PY tools/neo_apply.py
   gap
   echo "=== 2. recommended + NVites"
   $PY -m naukri_bot run --source recommended --only naukri --max 25 --max-applicants 100000
@@ -47,7 +47,7 @@ rows = [r for r in csv.DictReader(open("output/company_site_jobs.csv", encoding=
 open("output/cycles/company-today.txt", "w").write("".join(f'{r["external_url"]} | {r["title"]} | {r["naukri_url"]}\n' for r in rows))
 print("company-site jobs to apply:", len(rows))
 PYEOF
-  [ -s output/cycles/company-today.txt ] && $PY -m naukri_bot company-apply --file output/cycles/company-today.txt --submit --no-wait --browser-profile "$(free_profile)"
+  [ -s output/cycles/company-today.txt ] && $PY -m naukri_bot company-apply --file output/cycles/company-today.txt --submit --no-wait --browser-profile "$(free_profile)" &   # background: it stays open for any forms left for Ashu, and the later steps must not wait on that
   gap
   echo "=== 5. startups + top companies (web-found ATS boards, Workday)"
   $PY -m naukri_bot workday-run --submit --days 3 --max 8
@@ -70,7 +70,7 @@ if new:
     open("output/cycles/top-new.txt", "w").write("\n".join(f"{r.apply_url} | {r.title}" for r in new) + "\n")
     prof = subprocess.run(["bash", "-c", "source <(sed -n '/^free_profile()/,/^}/p' scripts/protocol.sh); free_profile"],
                           capture_output=True, text=True).stdout.strip() or "ats-profile-3"
-    subprocess.run([".venv/bin/python", "-m", "naukri_bot", "company-apply", "--file", "output/cycles/top-new.txt",
+    subprocess.Popen([".venv/bin/python", "-m", "naukri_bot", "company-apply", "--file", "output/cycles/top-new.txt",
                     "--submit", "--no-wait", "--browser-profile", prof])
 PYEOF
   gap
