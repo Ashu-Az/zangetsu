@@ -344,3 +344,20 @@ def test_workday_questions_28_oct(q, opts, expect):
 
 def test_soonest_start_is_immediate():
     assert rule_answer("What is the soonest you would be able to start?", [], "text", P).answer_text == "Immediately"
+
+
+def test_screening_questions_2_nov():
+    # left blank or answered wrongly on 2 Nov 2026 (Canonical, YipitData, Volga Partners, Lingaro, Supabase)
+    import yaml
+    from pathlib import Path
+    p = yaml.safe_load((Path(__file__).resolve().parent.parent / "profile" / "profile.yaml").read_text())   # canned answers live there
+    txt = lambda q: rule_answer(q, [], "text", p).answer_text
+    assert txt("Describe your experience with Kubernetes*").startswith("I've containerised")      # was "3 years"
+    assert txt("How many years of experience with Kubernetes?") == "3"
+    assert txt("Please explain any employment gaps in your work history").startswith("There are no gaps")
+    assert txt("Mention your previous company? ✱") == "HeadsUp Corporation"
+    assert "Azure OpenAI" in txt("Please link or briefly describe a specific GenAI or LLM feature you have built and deployed to production.")
+    ack = rule_answer("A final step in the hiring process is a background check", ["I acknowledge this."], "radio", p)
+    assert ack.selected_option_indices == [0]
+    tz = ["American Time Zones", "Asia Pacific Time Zones", "Europe, Middle East or Africa Time Zones", "Indian Ocean Time Zones"]
+    assert rule_answer("What time zone are you in?", tz, "dropdown", p).selected_option_indices == [1]

@@ -1,5 +1,7 @@
 # Running zangetsu on a new machine (state as of 29 Oct 2026)
 
+> Newer: see [HANDOFF-2026-11-05.md](HANDOFF-2026-11-05.md) for 30 Oct – 5 Nov (LinkedIn paced leads, Apple Mail sending, quota reserve 30).
+
 This is the handover for moving the job bot to another machine. It covers what to copy, how to set it up, how the
 daily protocol runs now, what changed between 21 and 29 October, and what still needs a human. For how the bot
 worked up to 16 October, see `docs/BOT-STATUS-AND-FIXES.md`; the `README.md` has the full architecture.
@@ -49,7 +51,7 @@ Naukri (`python -m naukri_bot login`), LinkedIn, Wellfound, Hirist, and Gmail in
 3. **Naukri search** (capped per run, see section 3) and **Wellfound**, side by side.
 4. **Hirist**: run it too (`python -m naukri_bot portal hirist --max 30`). It does not use Naukri's quota and
    brings 10–20 applications a day.
-5. **Recruiter emails**: draft, proof-read, then **send** (from the candidate's Gmail, never Apple Mail).
+5. **Recruiter emails**: draft, proof-read, then **send** (from the candidate's Gmail; Apple Mail allowed since 2 Nov).
 6. **Top companies** (Naukri postings of priority companies), **Workday**, Greenhouse / Lever / Ashby boards.
 7. **Company sites**: `scripts/hunt.sh company` fills each employer's own form with a tailored resume.
 8. **LinkedIn**: Easy Apply (`portal linkedin`), then hiring posts (`leads`) and `tools/post_outreach.py` for
@@ -79,7 +81,7 @@ display is off", or run `caffeinate -i`). Two morning runs on the old machine fa
 | Setting | Value now | Why |
 |---|---|---|
 | `DAILY_QUOTA` | 50 | Naukri's apply cap is a rolling 24 h; a 403 pauses Naukri until the next morning |
-| `PRIORITY_RESERVE` | **20** (was 8) | Keeps Naukri applies for Neo / NVites, whose best early-apply jobs show up later in the day |
+| `PRIORITY_RESERVE` | **30** (was 8, then 20 until 5 Nov) | Keeps Naukri applies for Neo / NVites, whose best early-apply jobs show up later in the day |
 | `NAUKRI_RUN_MAX` (env, read by `cycle.sh`) | **15** per search run | Spreads search applies over the day instead of burning the quota in one morning run |
 | `EXPERIENCE_SLACK` | **2** (was 1) | Jobs asking up to 4 years minimum are applied to; 5+ still skipped |
 | `MAX_JOB_AGE_DAYS` | 3 (pass 7 for wider sweeps) | The 3-day pool empties fast; 7 days finds many more |

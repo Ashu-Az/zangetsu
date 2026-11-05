@@ -7,9 +7,12 @@ answers selects/radios through the same rules as Naukri, ticks consent boxes, an
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 import re
+import subprocess
+import sys
 from pathlib import Path
 import time
 from dataclasses import dataclass, field
@@ -230,6 +233,23 @@ SIDE_WIDGET_JS = """e => { let n = e;
     if (n.tagName === 'FORM') break;
   }
   return false; }"""
+
+
+def _ask_code_dialog(path: Path, company: str, timeout_s: int) -> None:
+    """macOS: bring Apple Mail forward and pop up a box where Ashu types the emailed code (2 Nov 2026). He reads and
+    types it himself; the code proves a person is applying, so the bot never fetches it from the mailbox."""
+    if sys.platform != "darwin":
+        return
+    msg = f"The employer emailed you a security code to finish your application{(' for ' + company) if company else ''}. Type it here:"
+    script = (f'tell application "Mail" to activate\n'
+              f'set r to display dialog {json.dumps(msg)} default answer "" with title "Zangetsu: security code" '
+              f'buttons {{"Skip", "Submit"}} default button "Submit" giving up after {int(timeout_s)}\n'
+              f'if button returned of r is "Submit" then do shell script "printf %s " & quoted form of (text returned of r) '
+              f'& " > " & quoted form of {json.dumps(str(path))}')
+    try:
+        subprocess.Popen(["osascript", "-e", script], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except OSError:
+        pass
 
 
 class GenericFormApplier:
@@ -1124,6 +1144,7 @@ class GenericFormApplier:
         path = Path(self.code_file)
         path.unlink(missing_ok=True)
         log.info("    WAITING for the security code emailed to you -> write it to %s (up to %d min)", path, timeout_s // 60)
+        _ask_code_dialog(path, self.role or "", timeout_s)
         end = time.time() + timeout_s
         while time.time() < end:
             if path.exists() and path.read_text().strip():

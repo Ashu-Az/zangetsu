@@ -503,6 +503,23 @@ def rule_answer(question: str, options: list[str], kind: str, profile: dict) -> 
     if hit is not None:
         return hit
 
+    # "Describe your experience with Kubernetes" wants sentences, not "3 years": essay prompts go to the canned
+    # answers before the years-of-experience rules (Canonical, 2 Nov 2026)
+    if not has_opts and re.match(r"(please )?(describe|explain|tell us|share|walk us|briefly describe|link or briefly describe)\b", q):
+        for pat, text in (profile.get("canned_answers") or {}).items():
+            if re.search(pat, q, re.I):
+                return _answer(text)
+    # a lone acknowledgement option: "I acknowledge this." (background check notice), "I have submitted a PDF
+    # version of my resume." (YipitData, 2 Nov 2026) - both true statements, nothing is being claimed
+    if len(options) == 1 and re.match(r"\s*i (acknowledge|have submitted|have read|understand|confirm)\b", options[0], re.I) and \
+            not re.search(r"criminal|convict|disabilit|veteran|sponsor", q + " " + options[0], re.I):
+        return _answer("", 0, options)
+    # "What time zone are you in?" -> India is IST (UTC+5:30), listed under Asia Pacific (Canonical, 2 Nov 2026)
+    if has_opts and re.search(r"time ?zone", q) and re.search(r"(are you|do you (live|work)|your (current )?time ?zone|located)", q):
+        i = _opt(options, r"\bist\b|\bindia\b(?! ?ocean)", r"utc ?\+ ?5:?30|gmt ?\+ ?5:?30", r"asia")
+        if i is not None:
+            return _answer("", i, options)
+
     # date of birth: from profile.date_of_birth (YYYY-MM-DD), in the DD/MM/YYYY form Indian forms expect
     if re.fullmatch(r"(what is |please (enter|share|mention) )?(your )?(date of birth|dob|birth ?date)( \(dd/mm/yyyy\))?\??", q) and profile.get("date_of_birth") and not has_opts:
         y, m, d = str(profile["date_of_birth"]).split("-")

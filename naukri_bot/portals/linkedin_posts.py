@@ -98,6 +98,18 @@ def default_queries(profile: dict) -> list[str]:
             + [f"hiring {r} India" for r in ("GenAI engineer", "machine learning engineer", "data scientist")])
 
 
+def wide_queries(profile: dict) -> list[str]:
+    """More searches for a paced, multi-session run (`leads --sessions`): phrasings recruiters use when they want
+    resumes by email, across the roles Ashu fits. Shuffled so no two runs search in the same order."""
+    roles = ["AI engineer", "GenAI engineer", "LLM engineer", "machine learning engineer", "data scientist",
+             "python developer", "backend developer", "full stack developer", "software engineer", "AI ML developer",
+             "node js developer", "MLOps engineer"]
+    asks = ["share resume", "send cv", "email resume", "immediate joiner", "hiring"]
+    qs = [f"{a} {r}" if a == "hiring" else f"hiring {r} {a}" for r in roles for a in asks]
+    random.shuffle(qs)
+    return qs
+
+
 def parse_post(text: str, author: str, author_url: str, age: str, profile: dict) -> dict | None:
     """A lead dict if the post is a relevant, India-based hiring post that fits the profile, else None."""
     if not HIRING.search(text):
@@ -153,8 +165,11 @@ def collect(page, queries: list[str], profile: dict, scrolls: int = 4) -> list[d
                 except Exception:
                     if attempt == 0:
                         page.reload(wait_until="domcontentloaded"); time.sleep(random.uniform(5, 7))
-            for _ in range(scrolls):
-                page.mouse.wheel(0, 2500); time.sleep(random.uniform(1.5, 2.5))
+            # scroll like a reader: uneven distances, short pauses, now and then a longer stop on a post
+            for _ in range(scrolls + random.randint(0, 2)):
+                page.mouse.wheel(0, random.randint(900, 2600)); time.sleep(random.uniform(1.5, 3.5))
+                if random.random() < 0.3:
+                    time.sleep(random.uniform(4, 10))
             # expand "…more" so the full post text (emails are often at the end) is in the DOM
             for btn in page.locator(f"{POST} button:has-text('more')").all()[:40]:
                 try:
@@ -183,7 +198,7 @@ def collect(page, queries: list[str], profile: dict, scrolls: int = 4) -> list[d
         if empty_streak >= 3:
             log.error("3 searches in a row returned no posts: stopping (LinkedIn may be throttling)")
             break
-        time.sleep(random.uniform(20, 40))
+        time.sleep(random.uniform(25, 60))
     return list(leads.values())
 
 
@@ -214,20 +229,23 @@ def draft(lead: dict, profile: dict) -> str:
     hi = f"Hi {_first_name(lead['author'])}," if lead["author_is_person"] and _first_name(lead["author"]) else "Hello,"
     company = "" if lead["author_is_person"] else f" at {lead['author']}"
     role = lead["role"]
+    days = int(profile.get("notice_period_days", 15) or 0)
+    join = "I can join immediately" if days == 0 else f"I can join within {days} days"
+    notice = "immediate joiner" if days == 0 else f"{days}-day notice"
     body = (f"{hi}\n\nI saw your post about the {role} opening{company}. I'm an AI engineer with about two years of "
             "experience: I built an enterprise RAG pipeline over 1,000+ documents at 85% retrieval accuracy and cut API "
-            "latency from 400 ms to under 150 ms for 10,000+ users. I currently build reinforcement-learning environments "
+            "latency from 400 ms to under 150 ms for 10,000+ users. Most recently I built reinforcement-learning environments "
             "for LLM post-training (Python, FastAPI, PyTorch).\n\n"
-            f"I can join within {profile.get('notice_period_days', 15)} days. My resume is attached; happy to share more "
+            f"{join}. My resume is attached; happy to share more "
             "or take a quick call.\n\nThanks,\n" + _signature(profile))
     head = f"### {role} · {lead['author']} · posted {lead['post_age'] or '?'} ago\n"
     if lead["emails"]:
         return (head + f"**Email to:** {lead['emails']}  \n**Subject:** Application for {role} – {profile.get('name', '')} "
-                f"(AI Engineer, ~2 yrs, {profile.get('notice_period_days', 15)}-day notice)  \n"
+                f"(AI Engineer, ~2 yrs, {notice})  \n"
                 f"**Attach:** output/resumes/{lead['resume']}\n\n```\n{body}\n```\n")
     if lead["author_is_person"]:
         note = (f"{hi} I saw your post about the {role} role. I'm an AI engineer (~2 yrs: production RAG at 85% "
-                "retrieval accuracy, API latency 400→150 ms for 10k+ users), can join in 15 days. Could I send you my resume?")
+                "retrieval accuracy, API latency 400→150 ms for 10k+ users), " + join.replace("I can", "can") + ". Could I send you my resume?")
         return head + f"**LinkedIn message to:** {lead['author_url']}  \n*(no email in the post; {len(note)} chars)*\n\n```\n{note[:300]}\n```\n"
     links = lead["apply_links"] or "(no link in the post)"
     return head + f"**Company post, no email.** Apply via: {links}\n"

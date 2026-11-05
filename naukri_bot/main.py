@@ -15,6 +15,7 @@ import json
 import logging
 import re
 import sys
+import time
 
 from playwright.sync_api import TimeoutError as PWTimeout
 
@@ -477,10 +478,31 @@ def cmd_leads(settings: Settings, args) -> int:
         return 1
     profile = load_profile()
     Settings.browser_profile_dir = property(lambda self: STATE_DIR / "linkedin-profile")
-    queries = [q.strip() for q in args.queries.split(",")] if args.queries else LP.default_queries(profile)
-    with Browser(settings) as b:
-        leads = LP.collect(b.page, queries, profile)
-    new = LP.save(leads)
+    if args.queries:
+        queries = [q.strip() for q in args.queries.split(",")]
+    else:
+        queries = LP.wide_queries(profile) if args.sessions > 1 else LP.default_queries(profile)
+    # paced like a person: open LinkedIn, run a few searches, close it, take a break, come back (Ashu, 4 Nov 2026)
+    per = max(1, -(-len(queries) // max(1, args.sessions)))
+    batches = [queries[i:i + per] for i in range(0, len(queries), per)][:max(1, args.sessions)]
+    lo, _, hi = args.break_minutes.partition("-")
+    leads, new = [], []
+    for n, batch in enumerate(batches, 1):
+        until = paused_until("linkedin")
+        if until and "paused by Ashu" not in until:
+            log.error("LinkedIn cooldown until %s; stopping after %d session(s).", until, n - 1)
+            break
+        log.info("LinkedIn session %d/%d: %d search(es)", n, len(batches), len(batch))
+        with Browser(settings) as b:
+            got = LP.collect(b.page, batch, profile)
+        leads += got
+        new += LP.save(got)  # saved per session so a later stop keeps what was found
+        log.info("session %d: %d relevant, %d new so far (%d with an email address)",
+                 n, len(got), len(new), sum(1 for l in new if l["emails"]))
+        if n < len(batches):
+            pause_s = random.uniform(float(lo), float(hi or lo)) * 60
+            log.info("browser closed; next session in %.1f min", pause_s / 60)
+            time.sleep(pause_s)
     path = LP.write_drafts(new, profile)
     log.info("%d relevant hiring posts, %d new (%d with an email address) -> %s",
              len(leads), len(new), sum(1 for l in new if l["emails"]), path)
@@ -1056,6 +1078,9 @@ def main(argv: list[str] | None = None) -> None:
     rf.add_argument("--force", action="store_true", help="ignore the 3-hour minimum gap")
     le = sub.add_parser("leads", help="LinkedIn hiring posts -> leads CSV + outreach drafts (nothing is sent)")
     le.add_argument("--queries", help='comma-separated searches, e.g. "hiring AI engineer Bangalore, hiring python developer India"')
+    le.add_argument("--sessions", type=int, default=1,
+                    help="split the searches over N browser sessions with a break between (N>1 uses the wide query set)")
+    le.add_argument("--break-minutes", default="4-9", help="random break between sessions, in minutes (default 4-9)")
     a = sub.add_parser("ask", help="test how the model answers a question")
     a.add_argument("question")
     a.add_argument("--options")
