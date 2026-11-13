@@ -211,7 +211,7 @@ def neo_apply_one(b: Browser, llm, cache, tracker, job) -> str:
     custom resume -> wait until the resume step is done -> tailored resume (else original) -> answer the recruiter's
     questions -> "Successfully applied". Returns applied / partial:<why> / failed:<why>."""
     pg = b.page
-    labels = RESUME_DONE + ("Add missing details", "Skip this job")
+    labels = RESUME_DONE + ("Add missing details", "I'll answer myself", "Skip this job")
     baseline = {l: _count(pg, l) for l in labels}
     success0 = len(re.findall(r"Successfully applied to", pg.inner_text("body"), re.I))
     btn = _panel_button(pg, "Apply with custom Resume") or _panel_button(pg, "Apply now")
@@ -244,11 +244,16 @@ def neo_apply_one(b: Browser, llm, cache, tracker, job) -> str:
             log.info("  resume ready -> clicked %r", choice)
             continue
         if step == "questions":
-            el = new_button(pg, "Add missing details", baseline)
+            # Neo's question prompt: "Add missing details" (Oct 2026), or since 12 Nov 2026 "Fill answers with Neo" /
+            # "I'll answer myself" / "Skip this job". Answer ourselves: the bot's rules and Ashu's answers, not Neo's
+            # guesses (Indegene, 12 Nov 2026: the run stopped here)
+            el, which = new_button(pg, "Add missing details", baseline), "Add missing details"
+            if el is None:
+                el, which = new_button(pg, "I'll answer myself", baseline), "I'll answer myself"
             if el is None:
                 continue
             _click(el); step = "answering"
-            log.info("  clicked 'Add missing details'")
+            log.info("  clicked %r", which)
             handler = DrawerHandler(b, llm, cache, tracker, job, assist=False)
             if handler.wait_for_drawer(timeout_s=10):
                 answered = handler.run()

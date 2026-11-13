@@ -361,3 +361,31 @@ def test_screening_questions_2_nov():
     assert ack.selected_option_indices == [0]
     tz = ["American Time Zones", "Asia Pacific Time Zones", "Europe, Middle East or Africa Time Zones", "Indian Ocean Time Zones"]
     assert rule_answer("What time zone are you in?", tz, "dropdown", p).selected_option_indices == [1]
+
+
+RELIEVED = dict(P, serving_notice=False, relieved=True, last_working_day="10/10/2030", notice_period_days=0,
+                has_current_offers=False)
+
+
+def test_relieved_last_working_day_is_never_skipped():
+    # 13 Nov 2026: Neo offered only a "Skip this question" chip and the bot skipped; Ashu wants the date written
+    P = RELIEVED
+    r = rule_answer("If you are serving Notice, kindly mention your Last Working Day.", ["Skip this question"], "chip", P)
+    assert r is not None and r.selected_option_indices == [] and r.answer_text.startswith(P["last_working_day"])
+
+
+def test_counter_offer_is_no():
+    P = RELIEVED
+    r = rule_answer("Are you holding any counter offer ?", ["Yes", "No", "Skip this question"], "radio", P)
+    assert r is not None and r.answer_text == "No"
+
+
+def test_chatbot_chatter_is_not_a_question():
+    from naukri_bot.questionnaire import INFO_MESSAGE
+    assert INFO_MESSAGE.search("No worries, you can change your input")
+
+
+def test_serving_last_working_day_is_typed_not_skipped():
+    S2 = dict(P, serving_notice=True, last_working_day="15/12/2030")
+    r = rule_answer("If you are serving Notice, kindly mention your Last Working Day.", ["Skip this question"], "chip", S2)
+    assert r is not None and r.answer_text == "15/12/2030" and r.selected_option_indices == []

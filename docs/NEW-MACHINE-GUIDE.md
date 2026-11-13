@@ -1,6 +1,7 @@
 # Running zangetsu on a new machine (state as of 29 Oct 2026)
 
 > Newer: see [HANDOFF-2026-11-05.md](HANDOFF-2026-11-05.md) for 30 Oct – 5 Nov (LinkedIn paced leads, Apple Mail sending, quota reserve 30).
+> Newest: [HANDOFF-2026-11-13.md](HANDOFF-2026-11-13.md) for 6 – 13 Nov (Neo "I'll answer myself", chip answers, notice days-left, Instahyre, Naukri JD-email leads, freelance platforms).
 
 This is the handover for moving the job bot to another machine. It covers what to copy, how to set it up, how the
 daily protocol runs now, what changed between 21 and 29 October, and what still needs a human. For how the bot

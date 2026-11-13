@@ -39,6 +39,7 @@ class QuestionnaireResult:
 
 
 INFO_MESSAGE = re.compile(r"recruiter requires more information|please answer (the following|a few)|"
+                          r"no worries|you can change your (input|answer)|change your (input|answer)|"   # chatter (13 Nov 2026: answered "2")
                           r"kindly answer all the recruiter|thank you for showing interest|"   # Neo's drawer intro (14 Oct 2026)
                           r"answer (a few|the following) questions|to consider your appl", re.I)
 # a chatbot acknowledgement after an answer (24 Oct 2026: "Got it!" was answered by the LLM as if it were a question)
@@ -161,6 +162,12 @@ class DrawerHandler:
             labels = [options.nth(i).inner_text().strip() for i in range(options.count())]
             labels = [l for l in labels if l and l.lower() not in ("select", "select an option", "--select--")]
             return "dropdown", labels
+        # quick-reply chips under the chat (7-Eleven via Neo, 12 Nov 2026: "Please read and consent <privacy policy>"
+        # offered a single "Yes" chip and the text box was hidden, so the drawer stalled)
+        chips = [c.inner_text().strip() for c in self.page.locator(".chatbot_Chips .chatbot_Chip").all() if c.is_visible()]
+        chips = [c for c in chips if c]
+        if chips:
+            return "chip", chips
         if self._fv(S.SUGGESTOR_INPUT):
             return "suggestor", []
         if self._fv(S.TEXT_INPUT):
@@ -196,6 +203,24 @@ class DrawerHandler:
             idx = answer.selected_option_indices[0] if answer.selected_option_indices else None
             label = options[idx] if idx is not None and idx < len(options) else answer.answer_text
             sel.select_option(label=label)
+        elif kind == "chip":
+            idx = answer.selected_option_indices[0] if answer.selected_option_indices else None
+            if idx is None:
+                idx = next((i for i, o in enumerate(options) if o.strip().lower() == answer.answer_text.strip().lower()), None)
+            chips = [c for c in self.page.locator(".chatbot_Chips .chatbot_Chip").all() if c.is_visible()]
+            if idx is None and answer.answer_text.strip():
+                # a typed answer next to a lone "Skip this question" chip (last working day, 13 Nov 2026): type it
+                box = self._fv(S.TEXT_INPUT) or self.page.locator("[id^=userInput][contenteditable=true]").first
+                box.evaluate("e => { const c = e.closest('.inputBox_container'); if (c) c.classList.remove('d-none'); }")
+                box.click()
+                box.evaluate("e => { if (e.isContentEditable) e.innerText = ''; else e.value = ''; }")
+                self.page.keyboard.type(answer.answer_text, delay=random.randint(35, 110))
+                pause(0.5, 1.0)
+                if not self._click_send():
+                    self.page.keyboard.press("Enter")
+                return
+            if idx is not None and idx < len(chips):
+                chips[idx].click()
         elif kind == "suggestor":
             inp = self._wait_fv(S.SUGGESTOR_INPUT)
             inp.click()
@@ -290,7 +315,7 @@ class DrawerHandler:
             raise NeedsModel(question)
         ans = self.llm.answer_question(question, options, kind, self.job, self.transcript, rejected_previous=rejected)
         # sanity: option questions must carry a valid index; recover from label text if needed
-        if kind in ("radio", "checkbox", "dropdown") and options:
+        if kind in ("radio", "checkbox", "dropdown", "chip") and options:
             valid = [i for i in ans.selected_option_indices if 0 <= i < len(options)]
             if not valid and ans.answer_text:
                 valid = [i for i, o in enumerate(options) if o.strip().lower() == ans.answer_text.strip().lower()]

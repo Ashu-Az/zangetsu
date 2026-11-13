@@ -175,11 +175,16 @@ def tailored_pdf(jd_text: str, title: str, company: str, playwright=None, url: s
                 c = tidy(t)
                 if re.search(r"\byears?\b|\d|\.\s|\b(be|btech|b\.tech|degree|engineering)\b|^cd\b", c, re.I):
                     continue                      # a sentence fragment from the JD ("Years. be engineering"), not a skill
+                # Naukri page text and generic phrases, not skills (Ramxora, 13 Nov 2026: "Skills highlighted with ‘",
+                # "are preferred keyskills", "Interview evaluation", "Aiml" landed in the summary)
+                if re.search(r"highlight|preferred|keyskill|[‘’'\"“”]|interview|^aiml$|fullstack development|"
+                             r"\b(integration|architecture|deployment|pipelines?)$", c, re.I) or len(c.split()) > 3:
+                    continue
                 if c and c.lower() not in seen:
                     seen.add(c.lower()); out.append(c)
             return out
-        missing = clean(res["categories"].get("skills", {}).get("missing", []))
-        list_only = clean(res["categories"].get("skills", {}).get("skills_list_only", []))
+        missing = clean(res["categories"].get("skills", {}).get("missing", []))[:22]       # a short list reads as skills;
+        list_only = clean(res["categories"].get("skills", {}).get("skills_list_only", []))[:10]   # 50 phrases read as stuffing
         if missing:
             r.skills = list(r.skills) + [SkillGroup(name="Also worked with", items=list(missing))]
         if missing or list_only:          # the summary counts as experience for the engines: name the toolkit there

@@ -270,6 +270,9 @@ def _profile_fact(q: str, options: list[str], profile: dict, question_raw: str =
                      and not re.search(r"^are you (currently |now )?(employed|working) (at|for|with|by|in)\b", q)):
         if profile.get("serving_notice"):
             i = _opt(options, r"serving notice", r"currently employed", r"^employed", r"^yes")
+        elif profile.get("relieved"):
+            # left the last job (Quess, 20 Oct 2026) and not yet joined another: not currently employed
+            i = _opt(options, r"not (currently )?(employed|working)|unemployed|between jobs|available immediately|^no\b")
         else:
             i = _opt(options, r"currently employed(?!.*notice)", r"^employed", r"^yes")
         return _answer("", i, options) if i is not None else None
@@ -484,6 +487,55 @@ def _record_form(url: str, question: str) -> None:
         pass
 
 
+def _forms_12nov(q: str, options: list[str], profile: dict) -> QuestionAnswer | None:
+    """Questions that left Rubrik, Bolna, HighRadius, Databricks, Fampay and Okta forms open on 12 Nov 2026.
+    Ashu asked for every field to be filled."""
+    has_opts = bool(options)
+    # US sanctions / export-control self-identification (Databricks): India is none of the listed places
+    if has_opts and re.search(r"sanctions|export control", q) and any(re.search(r"cuba|iran|north korea", o, re.I) for o in options):
+        i = _opt(options, r"^\s*none of the above", r"^\s*none")
+        return _answer("", i, options) if i is not None else None
+    # its follow-up, only for people who picked something other than "none of the above"
+    if has_opts and re.search(r"other than .{0,3}none of the above", q):
+        i = _opt(options, r"^\s*not applicable", r"none of these apply")
+        return _answer("", i, options) if i is not None else None
+    # "HighRadius has my consent to collect, store, and process my data" / "you consent to Okta using your data"
+    if re.search(r"has my consent|consent to \w+ (using|to use|collecting|processing) (my |your )?(personal )?data|"
+                 r"consent to (collect|store|process)", q):
+        if has_opts:
+            i = _opt(options, r"^\s*(yes|i (agree|consent|accept|acknowledge))", r"agree|consent|accept|acknowledge")
+            if i is None and len(options) == 1:
+                i = 0
+            return _answer("", i, options) if i is not None else None
+        return _answer("Yes")
+    # "What year did you (or will you) pass out from college?" (Bolna)
+    if not has_opts and re.search(r"(what|which) year .{0,40}(pass(ed)? out|graduat)", q):
+        return _answer(str(profile.get("graduation_year") or 2024))
+    # "What is your expected CTC / stipend?" (Bolna): the word stipend would otherwise defer it as sensitive
+    if not has_opts and re.search(r"expected (fixed )?(ctc|salary|compensation).{0,10}stipend", q) and profile.get("expected_ctc_lpa"):
+        return _answer(f"{_fmt(_num(profile['expected_ctc_lpa']))} LPA")
+    # "Have you worked with transactional/payments data before? Describe the context." / visualisation tools (Fampay):
+    # essay prompts, so the canned answers come before the current-role rules that would grab "past/current role"
+    if not has_opts and re.search(r"transactional|payments? data|visuali[sz]e data", q):
+        for pat, text in (profile.get("canned_answers") or {}).items():
+            if re.search(pat, q, re.I):
+                return _answer(text)
+    # "What's your earliest possible joining date / notice period, if any?" (Bolna): immediate joiner
+    if not has_opts and re.search(r"earliest (possible )?joining date", q) and profile.get("notice_period_days") == 0:
+        return _answer("Immediately (available to join now)")
+    # "Are you holding any counter offer?" / "any other offers in hand?" (Neo, 13 Nov 2026): profile has_current_offers
+    if re.search(r"counter ?-?offer|(other|any) offers? (in hand|currently)|offer in hand|holding (an?y? )?offer", q) and \
+            profile.get("has_current_offers") is False:
+        if has_opts:
+            i = _opt(options, r"^\s*no\b")
+            return _answer("", i, options) if i is not None else None
+        return _answer("No")
+    # "Current firm you're part of?" (Databricks)
+    if not has_opts and re.search(r"current (firm|organi[sz]ation|company)\b", q) and profile.get("current_company"):
+        return _answer(str(profile["current_company"]))
+    return None
+
+
 def rule_answer(question: str, options: list[str], kind: str, profile: dict) -> QuestionAnswer | None:
     question_raw = question
     q = " ".join(question.lower().split())
@@ -500,6 +552,9 @@ def rule_answer(question: str, options: list[str], kind: str, profile: dict) -> 
     q = q.rstrip(" *:").strip()          # required-field marker: "How many years of Python?\xa0*"
     has_opts = bool(options)
     hit = _profile_fact(q, options, profile, question_raw)      # questions Ashu answered by hand before (13 Oct 2026 replay)
+    if hit is not None:
+        return hit
+    hit = _forms_12nov(q, options, profile)
     if hit is not None:
         return hit
 
@@ -823,7 +878,7 @@ def rule_answer(question: str, options: list[str], kind: str, profile: dict) -> 
 
     # ---- resigned? (serving notice means the resignation is in)
     if re.search(r"have you (already )?resigned|resignation (been )?(submitted|accepted|put)", q):
-        yes = bool(profile.get("serving_notice"))
+        yes = bool(profile.get("serving_notice") or profile.get("relieved"))     # relieved: left Quess on 20 Oct 2026
         if has_opts:
             i = next((k for k, o in enumerate(options) if re.match(r"\s*(yes|y)\b" if yes else r"\s*(no|n)\b", o, re.I)), None)
             return _answer("", i, options) if i is not None else None
@@ -885,8 +940,13 @@ def rule_answer(question: str, options: list[str], kind: str, profile: dict) -> 
         if has_opts:
             i = _yes_no(options, False); return _answer("", i, options) if i is not None else None
         return _answer("No")
-    # "What is the soonest you would be able to start?" - immediate joiner (last day at Quess 20 Oct 2026)
+    # "What is the soonest you would be able to start?" - right after the profile's last working day
     if re.search(r"soonest .{0,30}(start|join)", q):
+        left = _days_to_lwd(profile)
+        if left:
+            from datetime import date, timedelta
+            d = date.today() + timedelta(days=left + 1)
+            return _answer(f"{d.day} {d.strftime('%B %Y')} (right after my last working day)")
         return _answer("Immediately")
     # "Is your right to work based (now or in future) on a visa / sponsorship?" - Indian citizen working in India
     if re.search(r"right to work (is )?based .{0,40}(visa|sponsor|permit)|right to work based", q) and \
@@ -939,11 +999,18 @@ def rule_answer(question: str, options: list[str], kind: str, profile: dict) -> 
     asks_day_count = re.search(r"how many days|no\.? of days|number of days", q) and "if serving" not in q
     if re.search(r"last working (day|date)|\blwd\b|relieving date", q) and not asks_day_count:
         if profile.get("serving_notice") and profile.get("last_working_day"):
-            return _answer(str(profile["last_working_day"])) if not has_opts else None
+            # a lone "Skip this question" chip is not a real choice: type the date (Ashu 13 Nov 2026: never skip it)
+            real = [o for o in options if not re.match(r"\s*skip", o, re.I)]
+            return _answer(str(profile["last_working_day"])) if not real else None
         if not profile.get("serving_notice"):
-            if has_opts:
+            real = [o for o in options if not re.match(r"\s*skip", o, re.I)]
+            if real:
                 i = next((k for k, o in enumerate(options) if re.search(r"not serving|n/?a|no\b", o, re.I)), None)
                 return _answer("", i, options) if i is not None else None
+            # Ashu 13 Nov 2026: never skip the last-working-day question; write the date (only a "Skip" chip offered
+            # means the text box is the real answer)
+            if profile.get("last_working_day"):
+                return _answer(f"{profile['last_working_day']} (already relieved, immediate joiner)")
             return _answer("Not serving notice")
         return None
 
@@ -951,6 +1018,9 @@ def rule_answer(question: str, options: list[str], kind: str, profile: dict) -> 
     if ("notice" in q or "last working day" in q or re.search(r"\blwd\b", q) or (has_opts and re.search(r"how (soon|early|quickly) (can |could )?you (can )?join", q))
             or re.search(r"(after|of) accepting (an |the )?offer|before (you can )?start(ing)? work", q)):
         days = _num(profile.get("notice_period_days"))
+        left = _days_to_lwd(profile)          # serving notice: the days actually left until last_working_day
+        if left is not None:
+            days = left
         if days is None:
             return None
         if has_opts:
@@ -1192,6 +1262,19 @@ def rule_answer(question: str, options: list[str], kind: str, profile: dict) -> 
             return None
         return _answer("", _yes_no(options, True if profile.get("assume_skill_experience") else bool(yrs and yrs > 0)), options)
 
+    return None
+
+
+def _days_to_lwd(profile: dict) -> int | None:
+    """Days from today to the last working day while serving notice (0 once it has passed); None when not serving."""
+    if not profile.get("serving_notice"):
+        return None
+    from datetime import date, datetime
+    for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%d-%m-%Y"):
+        try:
+            return max(0, (datetime.strptime(str(profile.get("last_working_day") or ""), fmt).date() - date.today()).days)
+        except ValueError:
+            pass
     return None
 
 
