@@ -108,7 +108,7 @@ open Neo → type "Find jobs matching my profile" (then "Show me more jobs like 
 | Graduation year / completion month | 2024 / 10/2024 |
 | University name (free text) | Netaji Subhas University of Technology (NSUT), Delhi; also matches the old name NSIT |
 | SSC / HSC "Percentage / CGPA" | your 10th / 12th percentages from the profile |
-| Desired pay / expected CTC | 14 (LPA, negotiable) |
+| Desired pay / expected CTC | from profile.yaml `expected_ctc_lpa` (negotiable) |
 | SQL and other resume skills rated 1–10 | 8 |
 | BI tools (Tableau / Power BI) | No (not on your resume) |
 | Employment type | Full-time |

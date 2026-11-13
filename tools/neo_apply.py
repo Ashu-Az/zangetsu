@@ -253,8 +253,9 @@ def neo_apply_one(b: Browser, llm, cache, tracker, job) -> str:
             continue
         if step == "questions":
             # Nov 2026: Neo asks "Fill answers with Neo / I'll answer myself / Skip this job" instead of showing
-            # "Add missing details"; "I'll answer myself" opens the same drawer, answered by the bot's rules
-            # (Neutrinoiq, 6 Nov 2026). The drawer can also open on its own (Carnera, 6 Nov 2026).
+            # "Add missing details"; "I'll answer myself" opens the same drawer, answered by the bot's rules and Ashu's
+            # answers, never Neo's guesses (Neutrinoiq 6 Nov, Indegene 12 Nov 2026). The drawer can also open on its
+            # own (Carnera, 6 Nov 2026).
             handler = DrawerHandler(b, llm, cache, tracker, job, assist=False)
             el = new_button(pg, "Add missing details", baseline) or new_button(pg, "I'll answer myself", baseline)
             if el is None and not handler.drawer_visible():

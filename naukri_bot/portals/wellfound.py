@@ -185,7 +185,15 @@ class WellfoundPortal(Portal):
             pg.keyboard.press("Escape"); return ApplyResult("deferred", "submit disabled: a required field in the dialog is unfilled", res.questions)
         sub.click(); time.sleep(random.uniform(4, 6))
         after = (pg.locator("[role='dialog'], dialog[open]").last.inner_text() if pg.locator("[role='dialog'], dialog[open]").count() else "") + "\n" + (pg.locator("main").first.inner_text() if pg.locator("main").count() else "")
-        if re.search(r"application (sent|submitted)|you applied|applied\b", after, re.I) or pg.locator("button:has-text('Applied')").count():
+        # since 12 Nov 2026 Wellfound confirms with a toast outside the dialog ("Your application to X will be sent in a
+        # few minutes" + "Undo") and opens an "improve your odds" AI-interview modal; read the whole page
+        try:
+            toast = pg.inner_text("body")[:6000]
+        except Exception:
+            toast = ""
+        # only the toast's sentence counts from the body: the sidebar always has an "Applied" menu item
+        if re.search(r"application (sent|submitted)|you applied|applied\b", after, re.I) or \
+                re.search(r"your application to .{1,80}? will be sent", toast, re.I) or pg.locator("button:has-text('Applied')").count():
             res.status = "applied"; res.notes = "confirmed"
         else:
             res.notes = "no confirmation after submit"
