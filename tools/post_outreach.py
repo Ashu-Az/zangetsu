@@ -102,7 +102,8 @@ def main() -> int:
         if (r.get("found_at") or "") < since or not r.get("emails"):
             continue
         email = r["emails"].split(";")[0].split(",")[0].strip().lower()
-        role = clean_role(re.sub(r"\s+", " ", r.get("role") or "Software Engineer").strip(" :|-–•\t")[:70] or "Software Engineer")
+        role = re.sub(r"\s+", " ", r.get("role") or "Software Engineer").strip(" :|-–•\t")[:70]
+        role = clean_role(role.split(" | ")[0].strip() or "Software Engineer")   # "Python Backend Developer | Dionce"
         if not re.fullmatch(r"[\w.+-]+@[\w-]+(\.[\w-]+)*\.(com|in|io|ai|co|org|net|tech|dev|space|us|uk|app)", email):
             log.info("skip %-40s (not a complete email address)", email)
             continue

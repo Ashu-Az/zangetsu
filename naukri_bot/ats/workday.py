@@ -481,6 +481,34 @@ class WorkdayApplier:
         if re.search(r"industry (do )?you (specialize|specialise|work) in|industry (of )?(specialization|expertise)|which industry", l):
             # Ashu works in IT / software services
             return pick(r"information technology|^it\b|\bsoftware\b|\btechnology\b|\btech\b|\binternet\b|\bsaas\b", r"^others?\b")
+        # Marsh McLennan, 9 Nov 2026: conflict-of-interest check; Ashu has no current employer and no such dealings
+        if re.search(r"aware of any (ongoing )?(negotiations|tenders|rfps?|procurements)", l):
+            return pick(r"^no\b")
+        # BMS, 10 Nov 2026: the name and address entered are the ones on his Aadhaar
+        if re.search(r"acknowledge.{0,60}name.{0,80}(matches|same as).{0,60}aadhaa?r", l):
+            return pick(r"^yes\b")
+        # Northern Trust, 10 Nov 2026: the profile states the pronouns
+        if re.search(r"^(preferred )?pronouns?\b", l) and len(l) < 30 and p.get("pronouns"):
+            return pick(rf"^{re.escape(p['pronouns'])}$")
+        # Lowe's / Northern Trust, 10 Nov 2026
+        if re.search(r"^full time ?/ ?part time$", l):
+            return pick(r"^full time")
+        if re.search(r"employed by deloitte", l):             # never worked at Deloitte
+            return pick(r"^no\b")
+        if re.search(r"uses? tools powered by machine learning|(artificial intelligence|\bai\b).{0,80}analy[sz]e information you provide", l) \
+                and re.search(r"consent", l):
+            return pick(r"^yes\b")                             # AI-screening consent, as rules.py answers it elsewhere
+        if re.search(r"(agreement|obligation).{0,60}(current|prior|previous|former) employer.{0,40}restrict", l):
+            return pick(r"^no\b")                              # no non-compete / bond with Quess or earlier employers
+        # Lowe's, 10 Nov 2026: "willing and able to use this skill set in this language to serve our customers"
+        if re.search(r"willing and able to use this skill ?set", l):
+            return pick(r"^yes\b")
+        # Northern Trust, 10 Nov 2026: OCI/PIO cards are for foreign citizens of Indian origin; Ashu is an Indian citizen
+        if re.search(r"\b(oci|pio)\b.{0,10}card|overseas citizen(ship)? of india", l):
+            return pick(r"^no\b")
+        # TransUnion, 9 Nov 2026: laid off 20 Oct, immediate joiner -> no notice period to serve
+        if re.search(r"(need to|have to|required to) (provide|give|serve) (a )?notice( period)?", l):
+            return pick(r"^no\b")
         if re.search(r"^citizenship|^nationality|country of citizenship", l) and len(l) < 40:
             return pick(r"^citizen\b.{0,5}\(?india", r"^india$", r"^indian$", r"^india\b", r"^(indian )?citizen$", r"\bindian\b(?!.*non)")   # Indian citizen
         if re.search(r"^(country|country/territory)\b", l) and len(l) < 40:
@@ -500,7 +528,9 @@ class WorkdayApplier:
         # PayPal labels the disability group only "Please check one of the boxes below:"; the options say disability
         if re.search(r"disabilit", l) or (re.search(r"check one of the boxes", l)
                                           and any(re.search(r"disabilit", o, re.I) for o in options)):
-            return pick(r"^no\.?,? i (do not|don.t) have", r"^no\b") if p.get("disability") is False else None
+            # Medtronic India lists the RPwD Act categories ("Blindness (India)", ...) under "Disability, if applicable"
+            return pick(r"^no\.?,? i (do not|don.t) have", r"^no\b", r"^none\b", r"not applicable|^n/?a\b",
+                        r"no disabilit|without (a )?disabilit") if p.get("disability") is False else None
         if re.search(r"^language\b", l) and len(l) < 30:
             return pick(r"^english")
         if re.search(r"^(reading|speaking|writing|comprehension|overall|read|speak|write|spoken|written)\b|proficiency", l) and len(l) < 40:
@@ -745,8 +775,8 @@ class WorkdayApplier:
                     if inp.input_value().strip():             # text left by an earlier search hides the full list
                         inp.fill(""); time.sleep(0.5)
                     time.sleep(0.9)
-                    picked = []
-                    for _level in range(3):              # categories open a sub-list ("Job Board" -> "Naukri")
+                    picked, avoid = [], set()            # avoid: top choices whose sub-list had nothing true to pick
+                    for _level in range(5):              # categories open a sub-list ("Job Board" -> "Naukri")
                         opts = self._popup_options()
                         for _wait in range(8):           # the list often loads a moment after the click (Mastercard)
                             if opts:
@@ -757,7 +787,8 @@ class WorkdayApplier:
                             log.info("    %s: level %d %s list %s", label[:30], _level, " > ".join(picked) or "top", names)
                         if not opts and (picked or not re.search(r"how did you hear|^source|citizenship|nationality|country|field of study|major|discipline", label, re.I)):
                             break                        # nothing to choose (searchable fields fall through to typing)
-                        idx = None if picked and re.search(r"how did you hear|^source", label, re.I) else self._choice_for(label, names)
+                        idx = None if picked and re.search(r"how did you hear|^source", label, re.I) else \
+                            self._choice_for(label, [("" if n in avoid else n) for n in names])
                         if idx is None and not picked and re.search(r"citizenship|nationality|country", label, re.I):
                             # long country lists are virtualized: type to search, then choose from the filtered list
                             inp.fill(""); pg.keyboard.type(str(self.profile.get("country") or "India"), delay=40)
@@ -847,6 +878,15 @@ class WorkdayApplier:
                         if idx is None:
                             if picked:                   # say what the sub-list offered, so the next fix is obvious
                                 log.info("    %s: after %s the sub-list had %s", label[:40], picked, names[:15])
+                            if len(picked) == 1 and not avoid and re.search(r"how did you hear|^source", label, re.I):
+                                # TransUnion, 9 Nov 2026: "Other" holds only "Former TU Employee" / "TU Reached Out to Me";
+                                # go back to the top list and take the next true source ("Job Sites")
+                                avoid.add(picked[0]); picked = []
+                                pg.keyboard.press("Escape"); time.sleep(0.4)
+                                inp.click(); time.sleep(0.3); inp.fill(""); time.sleep(1.2)
+                                if not self._popup_options():
+                                    inp.click(); time.sleep(1.2)
+                                continue
                             break
                         opts[idx].click(); time.sleep(1.2)
                         picked.append(names[idx])
@@ -1343,6 +1383,13 @@ class WorkdayApplier:
         return self.result
 
     def _unknown(self, label: str, options: list[str]) -> None:
+        # Deutsche Bank India: "Disability, if applicable" lists only RPwD categories and no "None"; blank is the answer
+        if self.profile.get("disability") is False and re.search(r"disabilit.*if applicable|^disability\s*\*?$", label, re.I) and options \
+                and all(re.search(r"disabilit|\(india\)|blind|deaf|vision|hearing|illness|sclerosis|dwarfism|palsy|autism|acid attack", o, re.I)
+                        for o in options):
+            log.info("    %-45s -> (left blank: not applicable)  [profile]", label[:45])
+            self.result.filled.append({"label": label, "value": "(left blank: not applicable)", "source": "profile"})
+            return
         log.info("    %-45s -> (no answer) options=%s", label[:45], options[:6])
         self.result.filled.append({"label": label, "value": None, "source": "unknown", "options": options})
         from ..ask_ashu import record

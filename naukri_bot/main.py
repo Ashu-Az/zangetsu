@@ -537,6 +537,8 @@ def cmd_workday(settings: Settings, args) -> int:
         log.info("Workday: %s - %s", res.status, res.notes)
         tracker.record_application(JobPosting(job_id=args.url, url=args.url, title=args.title or "", company=company_from_url(args.url)),
                                    "workday", res.status, notes=(res.notes or "")[:200], resume_pdf=str(resume), remember=False)
+        # same key workday-run checks: a hand retry that submits must not be picked up again (BMS / Northern Trust, 11 Nov 2026)
+        tracker.mark_seen(f"workday:{args.url}", res.status)
         unknown = [f["label"] for f in res.filled if f["source"] == "unknown"]
         if unknown:
             log.info("unanswered fields: %s", unknown)

@@ -173,7 +173,7 @@ def tailored_pdf(jd_text: str, title: str, company: str, playwright=None, url: s
         acr = {"rag": "RAG", "llm": "LLM", "llms": "LLMs", "api": "API", "apis": "APIs", "sdk": "SDK", "sdks": "SDKs",
                "aws": "AWS", "eks": "EKS", "ml": "ML", "ai": "AI", "nlp": "NLP", "sql": "SQL", "iac": "IaC", "ci/cd": "CI/CD"}
         def tidy(t: str) -> str:
-            t = re.sub(r"^(including|and|with|or|such as|like|strong|good|hands-on)\s+", "", t.strip(), flags=re.I)
+            t = re.sub(r"^(including|and|with|or|such as|like|strong|good|hands-on|effective|following|similar)\s+", "", t.strip(), flags=re.I)
             words = [acr.get(w.lower(), w) for w in t.split()]
             if words and words[0] == words[0].lower():
                 words[0] = words[0][:1].upper() + words[0][1:]
@@ -182,8 +182,12 @@ def tailored_pdf(jd_text: str, title: str, company: str, playwright=None, url: s
             out, seen = [], set()
             for t in items:
                 c = tidy(t)
-                if re.search(r"\byears?\b|\d|\.\s|\b(be|btech|b\.tech|degree|engineering)\b|^cd\b", c, re.I):
+                # "engineering" alone is a degree fragment; "Prompt engineering" is a skill (Tuteck, 6 Nov 2026)
+                if re.search(r"\byears?\b|\d|\.\s|\b(be|btech|b\.tech|degree)\b|^cd\b", c, re.I) or (
+                        re.search(r"\bengineering\b", c, re.I) and not re.search(r"\bprompt engineering\b", c, re.I)):
                     continue                      # a sentence fragment from the JD ("Years. be engineering"), not a skill
+                if re.search(r"\b(nits?|iims?|iits?|bits|tier[- ]?\d)\b", c, re.I):
+                    continue                      # a college the JD prefers (DIOnce, 31 Oct 2026: "NITs, IIMs"), not a skill
                 if c and c.lower() not in seen:
                     seen.add(c.lower()); out.append(c)
             return out

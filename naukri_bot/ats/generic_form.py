@@ -458,9 +458,20 @@ class GenericFormApplier:
 
     def _needs_person(self, l: str) -> bool:
         """Labels the bot must never answer: per-entry dates, and acknowledgements that may be legal claims."""
+        if re.search(r"not located in the united states", l):  # "please confirm your US state" is a location question
+            return False
         if PER_ENTRY_DATE.search(l):
-            return True
+            # exception: Greenhouse's degree years ("Start date year" in .education--date-container) on a form with no
+            # employment block take the degree's own years from the profile (Meridial, 8 Nov 2026)
+            return not (re.fullmatch(r"(start|end) date year\*?", l.strip()) and self._education_dates_only())
         return bool(ACK_WORDING.search(l)) and not consent_only(l)
+
+    def _education_dates_only(self) -> bool:
+        try:
+            return self.pg.locator(".education--date-container").count() > 0 and \
+                self.pg.locator("[class*='employment']").count() == 0
+        except Exception:
+            return False
 
     def value_for(self, label: str) -> tuple[str | None, str]:
         # joined labels: "FullName*", "CompanyName*", "WorkEmail" (dotcom.co.in, 21 Oct 2026)
@@ -497,6 +508,8 @@ class GenericFormApplier:
             (r"street|address line|^address", p.get("address_line1")),
             (r"skill ?set|key skills|^skills", ", ".join((p.get("skills_primary") or [])[:12])),
             (r"cgpa|gpa|percentage", p.get("gpa")), (r"year of (passing|graduation)|graduation year|passing year", p.get("graduation_year")),
+            # Greenhouse's education block: "Start date year" / "End date year" number boxes (Meridial, 8 Nov 2026)
+            (r"^start date year", p.get("education_start_year")), (r"^end date year", p.get("graduation_year")),
         ]
         short = len(re.sub(r"[*:()\s]+", " ", l).strip()) <= 40 and "?" not in l
         if short:                                   # "City", "School" - never words inside a longer question
@@ -581,6 +594,9 @@ class GenericFormApplier:
             (r"bring your own laptop|own laptop|byod", "Yes, definitely"),
             (r"^(enter )?days ?/ ?months?$|notice period.{0,10}(days|in days)", str(p.get("notice_period_days") or "")),
             (r"deemed export|export control (rule|regulation)s? (affect|apply)", "No"),   # India roles, Indian citizen (Ashu, 7 Oct 2026)
+            # "If you are based in the United States, confirm your state ... else 'I am not located in the United States'"
+            # (Meridial / Invisible, 8 Nov 2026)
+            (r"not located in the united states", "I am not located in the United States"),
             (r"^(work|job|employment) type\b|type of (employment|job|work)|preferred employment", "Full-time"),
             # Ashu (6 Oct 2026): uses AI when stuck - drafts a plan, has AI critique it, then picks the best one himself
             (r"how (do )?you use ai tools|describes how you use ai", "I regularly use AI tools to speed up existing tasks"),
@@ -1290,6 +1306,11 @@ class GenericFormApplier:
             want = str(int(yrs))
         elif re.fullmatch(r"(current )?(city|location)\*?", label.strip(), re.I):
             want = next(iter(self.profile.get("city_choices") or []), None) or self.profile.get("city")
+        # Greenhouse's education block asks "Start date year" / "End date year" as lists (Meridial, 8 Nov 2026)
+        elif re.fullmatch(r"start date year\*?", label.strip(), re.I) and self.profile.get("education_start_year"):
+            want = str(self.profile["education_start_year"])
+        elif re.fullmatch(r"end date year\*?", label.strip(), re.I) and self.profile.get("graduation_year"):
+            want = str(self.profile["graduation_year"])
         is_city = bool(re.fullmatch(r"(current )?(city|location)\*?", label.strip(), re.I))
         if want and (is_city or not names or all(re.search(r"^(loading|no options|type to search)", n, re.I) for n in names)):
             # async lists (cities) stay empty until something is typed

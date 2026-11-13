@@ -70,7 +70,14 @@ def load_profile() -> dict:
     if not path.exists():
         path = PROFILE_DIR / "profile.example.yaml"
     with open(path, encoding="utf-8") as f:
-        return yaml.safe_load(f) or {}
+        profile = yaml.safe_load(f) or {}
+    # a run-specific overlay replaces top-level keys, e.g. profile/profile.freelance.yaml for freelance / AI-training
+    # gigs, where "trainer" titles and contract work are the point (8 Nov 2026)
+    overlay = os.environ.get("PROFILE_OVERLAY", "")
+    if overlay:
+        with open(PROFILE_DIR / overlay, encoding="utf-8") as f:
+            profile.update(yaml.safe_load(f) or {})
+    return profile
 
 
 def load_resume_markdown() -> str:

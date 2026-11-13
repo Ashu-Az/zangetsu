@@ -211,7 +211,7 @@ def neo_apply_one(b: Browser, llm, cache, tracker, job) -> str:
     custom resume -> wait until the resume step is done -> tailored resume (else original) -> answer the recruiter's
     questions -> "Successfully applied". Returns applied / partial:<why> / failed:<why>."""
     pg = b.page
-    labels = RESUME_DONE + ("Add missing details", "Skip this job")
+    labels = RESUME_DONE + ("Add missing details", "I'll answer myself", "Skip this job")
     baseline = {l: _count(pg, l) for l in labels}
     success0 = len(re.findall(r"Successfully applied to", pg.inner_text("body"), re.I))
     btn = _panel_button(pg, "Apply with custom Resume") or _panel_button(pg, "Apply now")
@@ -223,6 +223,7 @@ def neo_apply_one(b: Browser, llm, cache, tracker, job) -> str:
     # "Apply now" has no resume step: Neo goes straight to the recruiter's questions
     # (16 Oct 2026: Infosys/Indium failed after 4 min waiting for resume buttons
     # while "Add missing details" was on screen)
+    neo_ok = False      # Neo's own "Successfully applied" message (Soul AI, 6 Nov 2026: the job page lagged behind it)
     step, answered, answered_at = ("resume" if used == "Apply with custom Resume" else "questions"), None, 0.0
     deadline = time.time() + 240
     while time.time() < deadline:
@@ -232,6 +233,7 @@ def neo_apply_one(b: Browser, llm, cache, tracker, job) -> str:
             raise QuotaReached()
         if len(re.findall(r"Successfully applied to", body, re.I)) > success0:
             log.info("  Neo: successfully applied")
+            neo_ok = True
             break
         if step == "resume":
             # the resume step is over when THIS job's "Use original Resume" appears (with "Apply with tailored
@@ -250,15 +252,59 @@ def neo_apply_one(b: Browser, llm, cache, tracker, job) -> str:
             log.info("  resume ready -> clicked %r", choice)
             continue
         if step == "questions":
-            el = new_button(pg, "Add missing details", baseline)
-            if el is None:
-                continue
-            _click(el); step = "answering"
-            log.info("  clicked 'Add missing details'")
+            # Nov 2026: Neo asks "Fill answers with Neo / I'll answer myself / Skip this job" instead of showing
+            # "Add missing details"; "I'll answer myself" opens the same drawer, answered by the bot's rules
+            # (Neutrinoiq, 6 Nov 2026). The drawer can also open on its own (Carnera, 6 Nov 2026).
             handler = DrawerHandler(b, llm, cache, tracker, job, assist=False)
+            el = new_button(pg, "Add missing details", baseline) or new_button(pg, "I'll answer myself", baseline)
+            if el is None and not handler.drawer_visible():
+                continue
+            if el is not None:
+                label = el.inner_text().strip()
+                _click(el)
+                log.info("  clicked %r", label)
+                # the pill under "I'll answer myself" ignored a click with the drawer never opening (6 Nov 2026):
+                # retry with a mouse click at its centre, then the keyboard
+                for how in ("mouse", "enter", "pill", "icon", "type"):
+                    if handler.wait_for_drawer(timeout_s=15):
+                        break
+                    try:
+                        if how == "type":
+                            # every click was ignored (Meltwater, 7 Nov 2026): send the choice as a chat message
+                            box = pg.locator("div.aGn-uI-footer__textbox-input[contenteditable=true]").first
+                            box.click(timeout=5000)
+                            pg.keyboard.type(label, delay=40)
+                            pg.keyboard.press("Enter")
+                        elif how == "mouse":
+                            box = el.bounding_box()
+                            pg.mouse.click(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+                        elif how == "enter":
+                            el.focus(); pg.keyboard.press("Enter")
+                        else:
+                            # the text div took focus but nothing happened (6 Nov 2026, 2nd run): the handler may sit on
+                            # the pill around it or on its arrow icon
+                            sel = "xpath=ancestor::div[contains(@class,'aGn-uI-action-pill')][1]"
+                            target = el.locator(sel)
+                            if how == "icon":
+                                target = target.locator(".aGn-uI-action-pill__icon")
+                            target.first.click(timeout=5000)
+                        log.info("  drawer not open: retried %r with %s", label, how)
+                    except Exception as e:
+                        log.info("  retry with %s failed: %s", how, str(e)[:100])
+            step = "answering"
             if handler.wait_for_drawer(timeout_s=10):
                 answered = handler.run()
                 log.info("  questions: %d answered, completed=%s %s", len(answered.answered), answered.completed, answered.notes[:80])
+            elif el is not None:
+                # every retry was ignored or Neo handed the job back in its own words ("you can fill the details
+                # yourself", "you can handle the answers on your own", Meltwater, 7 Nov 2026) with no drawer:
+                # apply on the job page, where the usual questionnaire flow answers the recruiter's questions
+                time.sleep(10)
+                log.info("  Neo opened no questions -> applying on the job page")
+                with Side(b):
+                    b.goto(job.url)
+                    ok = handle_naukri_apply(b, llm, cache, job, tracker, dry_run=False)
+                return "applied" if ok else "failed:job-page apply not confirmed"
             answered_at = time.time()
             continue
         if step == "answering" and time.time() > answered_at + 45:
@@ -273,7 +319,7 @@ def neo_apply_one(b: Browser, llm, cache, tracker, job) -> str:
             ok = False
     if ok and answered is not None and (not answered.completed or answered.notes.startswith("needs model")):
         return "partial:" + answered.notes[:120]
-    return "applied" if ok else f"failed:not confirmed on the job page (stopped at step '{step}')"
+    return "applied" if ok or neo_ok else f"failed:not confirmed on the job page (stopped at step '{step}')"
 
 
 def main() -> None:
@@ -341,9 +387,13 @@ def main() -> None:
                         continue
                     done_ids.add(jid); progress = True
                     url = f"https://www.naukri.com/job-listings-{jid}"
-                    with Side(b):
-                        job = scrape_job(b, url)
-                        mode = detect_apply_mode(b)
+                    # a slow job page skips that card, not the whole Neo step (goto timeout, 7 Nov 2026)
+                    try:
+                        with Side(b):
+                            job = scrape_job(b, url)
+                            mode = detect_apply_mode(b)
+                    except Exception as e:
+                        log.info("  could not load job page %s: %s", jid, str(e)[:60]); continue
                     log.info("%s | %s | %s | %s", job.title or title, job.company, job.experience, mode.value)
                     prev = (tracker.seen.get(job.job_id or jid) or {}).get("status", "")
                     if mode == ApplyMode.ALREADY_APPLIED or prev in SUBMITTED_STATUSES:

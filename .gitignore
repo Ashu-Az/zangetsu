@@ -36,3 +36,7 @@ logs/
 *.bak
 .DS_Store
 backup-local-*/
+
+# Personal overlays and env backups
+profile/profile.freelance.yaml
+.env.bak*
