@@ -323,6 +323,8 @@ def survey_jobs(b: Browser, cards, settings: Settings, profile: dict, tracker: T
             survey.put(job, mode)
             pause(1.0, 2.5)
         reason = eligibility(job, mode, settings, profile)
+        if jd_check and reason == "title_not_in_include_list":
+            reason = None                                  # the JD decides for vague titles
         if jd_check and not reason:
             ok, hits = jd_relevant(job, profile)
             log.info("  [%d/%d] vague title, JD check: %s — %d skills %s", i, len(cards), job.title[:50], len(hits), hits[:8])

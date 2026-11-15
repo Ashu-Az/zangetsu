@@ -76,17 +76,24 @@ class WellfoundPortal(Portal):
             pg.mouse.wheel(0, 1500); time.sleep(0.8)
         raw = pg.evaluate("""() => Array.from(document.querySelectorAll('a[href*="/jobs/"]')).filter(a => /\\/jobs\\/\\d+/.test(a.href)).map(a => {
             let row = a; for (let k = 0; k < 8; k++) { row = row.parentElement; if (row && /years of exp/.test(row.innerText || '') && /ago|today|yesterday/i.test(row.innerText || '')) break; }
-            let comp = row; for (let k = 0; k < 6 && comp; k++) { comp = comp.parentElement; const h = comp && comp.querySelector('h2, a[href^="/company/"], a[href*="wellfound.com/company/"]'); if (h) { return {href: a.href.split('?')[0], row: row ? row.innerText : '', company: h.innerText.trim()}; } }
-            return {href: a.href.split('?')[0], row: row ? row.innerText : '', company: ''};
+            let comp = row; for (let k = 0; k < 6 && comp; k++) { comp = comp.parentElement; const h = comp && comp.querySelector('h2, a[href^="/company/"], a[href*="wellfound.com/company/"]'); if (h) { return {href: a.href.split('?')[0], text: (a.innerText || '').trim(), row: row ? row.innerText : '', company: h.innerText.trim()}; } }
+            return {href: a.href.split('?')[0], text: (a.innerText || '').trim(), row: row ? row.innerText : '', company: ''};
         })""")
         out, seen = [], set()
+        # a job id can be linked twice (title link + a link under the company header): use the link whose own text
+        # is the title. Taking the first one gave titles like "WebIndiaInc" / "Ascendeum" on the all-India feed (15 Nov 2026)
+        comp_names = {r["company"].split("\n")[0].strip().lower() for r in raw if r.get("company")}
+        def good(r):
+            tx = (r.get("text") or "").split("\n")[0].strip()
+            return bool(tx) and len(tx) < 120 and tx.lower() not in comp_names
+        raw = sorted(raw, key=lambda r: not good(r))          # title links first, stable order otherwise
         for r in raw:
             jid = re.search(r"/jobs/(\d+)", r["href"]).group(1)
             if jid in seen:
                 continue
             seen.add(jid)
             lines = [l.strip() for l in r["row"].split("\n") if l.strip()]
-            title = lines[0] if lines else ""
+            title = r["text"].split("\n")[0].strip() if good(r) else (lines[0] if lines else "")
             exp = next((l for l in lines if "years of exp" in l), "")
             posted = next((l for l in lines if re.search(r"\bago\b|today|yesterday", l, re.I)), "")
             sal = next((l for l in lines if "₹" in l or "$" in l), "")

@@ -130,6 +130,8 @@ class Portal:
                 continue
             scrape_failures = 0
             reason = eligibility(job, mode, self.settings, self.profile)
+            if jd_check and reason == "title_not_in_include_list":
+                reason = None                                  # the JD decides for vague titles
             if jd_check and not reason:
                 ok, hits = jd_relevant(job, self.profile)
                 log.info("[%s] vague title, JD check: %s — %d skills %s", self.name, job.title[:50], len(hits), hits[:8])
