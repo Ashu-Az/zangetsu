@@ -22,7 +22,7 @@ from playwright.sync_api import TimeoutError as PWTimeout
 from . import selectors as S
 from .answers_store import AnswerCache
 from .browser import Browser
-from .config import OUTPUT_DIR, Settings, load_profile, load_resume_markdown, profile_is_example
+from .config import OUTPUT_DIR, Settings, load_profile, load_resume_markdown, profile_is_example, STATE_DIR
 from .humanize import pause, scroll_like_reader
 from .job_page import detect_apply_mode, scrape_job
 from .llm import LLM
@@ -220,6 +220,53 @@ def cmd_ask(settings: Settings, args) -> int:
     kind = "radio" if options else "text"
     ans = llm.answer_question(args.question, options, kind, None, [])
     print(ans.model_dump_json(indent=2))
+    return 0
+
+
+def _fit_job(settings: Settings, target: str, jd: str, company: str = "") -> JobPosting:
+    """A JobPosting from a Naukri URL (scraped with the bot's browser) or from a title plus JD text / file."""
+    if target.startswith("http"):
+        from .job_page import scrape_job
+        with Browser(settings) as b:
+            b.ensure_logged_in()
+            return scrape_job(b, target)
+    if jd and Path(jd).exists():
+        jd = Path(jd).read_text()
+    return JobPosting(job_id="manual", url="", title=target, company=company, description=jd)
+
+
+def cmd_fit(settings: Settings, args) -> int:
+    from .fit import decide
+    job = _fit_job(settings, args.target, args.jd)
+    verdict, score, why = decide(job, load_profile())
+    print(f"{verdict.upper()}  (score {score:+.1f})  {job.title} @ {job.company}")
+    for w in why:
+        print("  -", w)
+    return 0
+
+
+def cmd_fit_feedback(settings: Settings, args) -> int:
+    from .fit import SEED_NO, Feedback, decide
+    fb = Feedback()
+    if args.label == "seed":
+        for title, text in SEED_NO:
+            fb.add(title, text, False)
+        # positives: the posting text of jobs he applied to and the model already rates "apply"
+        survey = json.loads((STATE_DIR / "survey.json").read_text()) if (STATE_DIR / "survey.json").exists() else {}
+        seen = json.loads((STATE_DIR / "seen_jobs.json").read_text()) if (STATE_DIR / "seen_jobs.json").exists() else {}
+        n = 0
+        for k, v in survey.items():
+            if n >= 40 or (seen.get(k) or {}).get("status") != "applied":
+                continue
+            j = v.get("job", v)
+            job = JobPosting(job_id=k, url=j.get("url", ""), title=j.get("title", ""), description=j.get("description") or "")
+            if decide(job, {}, Feedback(path=STATE_DIR / "__none__"))[0] == "apply":
+                fb.add(job.title, job.description, True, j.get("company", "")); n += 1
+        print(f"seeded {len(SEED_NO)} no + {n} yes examples -> {fb.path}")
+        return 0
+    job = _fit_job(settings, args.target, args.jd, args.company)
+    fb.add(job.title, job.description, args.label == "yes", job.company)
+    print(f"recorded {args.label}: {job.title} @ {job.company}")
     return 0
 
 
@@ -1122,8 +1169,18 @@ def main(argv: list[str] | None = None) -> None:
     a.add_argument("question")
     a.add_argument("--options")
 
+    ft = sub.add_parser("fit", help="would Ashu apply? explain the fit decision for a job (naukri_bot/fit.py)")
+    ft.add_argument("target", help="a Naukri job URL, or a job title (then pass --jd)")
+    ft.add_argument("--jd", default="", help="job description text, or a path to a file holding it")
+
+    fb = sub.add_parser("fit-feedback", help="teach the fit model: yes/no for a job (stored in state/fit_feedback.jsonl)")
+    fb.add_argument("label", choices=["yes", "no", "seed"], help="'seed' loads the starter examples")
+    fb.add_argument("target", nargs="?", default="", help="a Naukri job URL or a job title")
+    fb.add_argument("--jd", default="", help="job description text or a file path")
+    fb.add_argument("--company", default="")
+
     args = p.parse_args(argv)
     setup_logging(args.verbose)
     settings = Settings()
-    cmd = {"login": cmd_login, "run": cmd_run, "scrape": cmd_scrape, "tailor": cmd_tailor, "ask": cmd_ask, "profile": cmd_profile, "portal": cmd_portal, "leads": cmd_leads, "workday": cmd_workday, "workday-run": cmd_workday_run, "company-apply": cmd_company_apply, "refresh": cmd_refresh, "nvites": cmd_nvites, "neo": cmd_neo, "top-company-sites": cmd_top_company_sites, "early-access": cmd_early_access, "outreach": cmd_outreach}[args.cmd]
+    cmd = {"login": cmd_login, "run": cmd_run, "scrape": cmd_scrape, "tailor": cmd_tailor, "ask": cmd_ask, "profile": cmd_profile, "portal": cmd_portal, "leads": cmd_leads, "workday": cmd_workday, "workday-run": cmd_workday_run, "company-apply": cmd_company_apply, "refresh": cmd_refresh, "nvites": cmd_nvites, "neo": cmd_neo, "top-company-sites": cmd_top_company_sites, "early-access": cmd_early_access, "outreach": cmd_outreach, "fit": cmd_fit, "fit-feedback": cmd_fit_feedback}[args.cmd]
     sys.exit(cmd(settings, args))

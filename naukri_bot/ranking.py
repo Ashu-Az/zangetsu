@@ -183,7 +183,12 @@ def jd_skill_hits(job, profile: dict) -> list[str]:
 
 def jd_relevant(job, profile: dict) -> tuple[bool, list[str]]:
     hits = jd_skill_hits(job, profile)
-    return len(hits) >= int(profile.get("jd_min_skill_hits", 3)), hits
+    if len(hits) >= int(profile.get("jd_min_skill_hits", 3)):
+        return True, hits
+    # the fit model reads the whole JD (weighted stack, non-engineering signals, Ashu's feedback): a vague title whose
+    # JD it rates "apply" passes even with fewer exact skill words (15 Nov 2026: "make the bot smart")
+    from .fit import decide
+    return decide(job, profile)[0] == "apply", hits
 
 
 def company_excluded(company: str, profile: dict) -> bool:
@@ -250,6 +255,12 @@ def eligibility(job: JobPosting, mode: ApplyMode, settings: Settings, profile: d
     cap = settings.max_applicants if mode == ApplyMode.COMPANY_SITE else settings.max_applicants_direct
     if cap and job.applicants is not None and job.applicants > cap:
         return f"too_many_applicants:{job.applicants}"
+    # last gate: would Ashu apply? (naukri_bot/fit.py) Only a confident "skip" stops the job; "unsure" goes ahead
+    if profile.get("fit_gate", True) and (job.description or "").strip():
+        from .fit import decide
+        verdict, _, why = decide(job, profile)
+        if verdict == "skip":
+            return "fit_skip:" + (why[-1] if why else "no stack named")[:80]
     return None
 
 
