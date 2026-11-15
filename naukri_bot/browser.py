@@ -42,15 +42,17 @@ class Browser:
             args=["--disable-blink-features=AutomationControlled", "--no-first-run"],
             ignore_default_args=["--enable-automation"],
         )
+        # LinkedIn is paused (Ashu, 13 Nov 2026: "stop opening linkedin"): no bot window may load it, whatever a page
+        # links to. Set LINKEDIN_ENABLED=1 to allow it again (the linkedin-profile leads run needs that).
+        # Blocked at DNS level: a context.route() filter intercepts every request and left Naukri's app blank (14 Nov).
+        import os
+        if os.environ.get("LINKEDIN_ENABLED") != "1":
+            kwargs["args"].append("--host-resolver-rules=MAP linkedin.com ~NOTFOUND, MAP *.linkedin.com ~NOTFOUND, "
+                                  "MAP lnkd.in ~NOTFOUND, MAP *.licdn.com ~NOTFOUND")
         if self.settings.browser_executable:
             kwargs["executable_path"] = self.settings.browser_executable
         self.context = self.pw.chromium.launch_persistent_context(**kwargs)
         self.context.set_default_timeout(15000)
-        # LinkedIn is paused (Ashu, 13 Nov 2026: "stop opening linkedin"): no bot window may load it, whatever a page
-        # links to. Set LINKEDIN_ENABLED=1 to allow it again (the linkedin-profile leads run needs that).
-        import os
-        if os.environ.get("LINKEDIN_ENABLED") != "1":
-            self.context.route(lambda u: "linkedin.com" in u or "lnkd.in" in u, lambda route: route.abort())
         # never hand an email link to macOS: a click on an "Apply" that is really mailto: opened Apple Mail on Ashu's
         # Mac (22 Oct 2026). Block it in every page; the address is kept on the link for the outreach step (Gmail).
         self.context.add_init_script("""

@@ -17,6 +17,11 @@ ROLE_SLUGS = {
     "backend developer": "backend-engineer", "backend engineer": "backend-engineer", "python developer": "python-developer", "software developer": "software-engineer", "generative ai engineer": "artificial-intelligence-engineer",
 }
 
+# role pages that exist for India (checked 15 Nov 2026); founding-engineer, member-of-technical-staff,
+# applied-ai-engineer, forward-deployed-engineer, mlops-engineer etc. redirect to /location/india instead
+EXTRA_SLUGS = {"ai-engineer", "data-engineer", "devops-engineer", "frontend-engineer", "software-developer",
+               "react-developer", "node-js-developer"}
+
 
 def cover_note(job: JobPosting, profile: dict) -> str:
     """profile.cover_note is a template with {title} and {company}; otherwise build a short generic note."""
@@ -59,8 +64,10 @@ class WellfoundPortal(Portal):
         return (qs[-1].strip() if qs else txt)[:300]
 
     def search_urls(self) -> list[str]:
-        slugs = {ROLE_SLUGS.get(k.lower(), k.lower().replace(" ", "-")) for k in self.settings.keywords}
-        return [f"https://wellfound.com/role/l/{s}/india" for s in sorted(slugs)]
+        slugs = {ROLE_SLUGS.get(k.lower(), k.lower().replace(" ", "-")) for k in self.settings.keywords} | EXTRA_SLUGS
+        # the all-India startup feed first: founding / MTS / oddly titled roles live only there (no role page of their
+        # own; /role/l/founding-engineer/india redirects to it). Vague titles get a JD skill check (ranking.needs_jd_check)
+        return ["https://wellfound.com/location/india"] + [f"https://wellfound.com/role/l/{s}/india" for s in sorted(slugs)]
 
     def collect_cards(self, url: str) -> list[JobCard]:
         pg = self.page

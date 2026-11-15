@@ -725,7 +725,7 @@ def rule_answer(question: str, options: list[str], kind: str, profile: dict) -> 
     # rules were answering "Yes" to medical exams, drug tests, 2-year bonds with penalties and unpaid work.
     # ...except that "have you entered into / are you bound by a non-compete?" is a fact the profile records
     # (restrictive_covenant); only "would you sign one?" is the person's call.
-    existing_covenant = re.search(r"non-?compete|restrictive covenant", q) and \
+    existing_covenant = re.search(r"non-?compete|not to compete|restrictive covenant", q) and \
         re.search(r"have you (ever )?(entered|signed|agreed)|are you (currently |presently |now )?(bound|subject|party)|do you have (any |an )?(existing|current|employment agreement|restrictions?)", q)
     if SENSITIVE.search(q) and not (existing_covenant and "restrictive_covenant" in profile):
         return None
@@ -1278,6 +1278,16 @@ def rule_answer(question: str, options: list[str], kind: str, profile: dict) -> 
     # ---- work authorization / visa sponsorship: answered for the country the candidate is authorized in (India).
     # The bot only applies to India-based roles; a question naming another country gets no automatic answer.
     auth_country = str(profile.get("work_authorized_in") or "").lower()
+    # Workday "Will you need a visa, work permit ...?" with statement options, not Yes/No (Verizon, 15 Nov 2026)
+    if auth_country and has_opts and re.search(r"visa|work permit|government authori[sz]ation", q) and \
+            not re.search(r"\b(united states|usa|u\.s\.|uk|united kingdom|canada|europe|germany|singapore|australia)\b", q):
+        i = next((k for k, o in enumerate(options) if re.search(r"legally (able|authori[sz]ed|eligible) to work|do not (need|require)", o, re.I)
+                  and not re.search(r"expire|will need", o, re.I)), None)
+        if i is not None:
+            return _answer("", i, options)
+    # passport: a fact in the profile (has_passport)
+    if "has_passport" in profile and has_opts and re.search(r"(have|hold|possess) (a |an )?(valid )?passport", q):
+        i = _yes_no(options, bool(profile["has_passport"])); return _answer("", i, options) if i is not None else None
     if auth_country and re.search(r"(legally )?authori[sz]ed (\(or eligible\) |or eligible )?to work|eligible to work|right to work|work permit|legal right to (perform|work)|"
                                   r"verification of (both )?your identity and authori[sz]ation", q):
         other = re.search(r"\b(united states|usa|u\.s\.|uk|united kingdom|canada|europe|germany|singapore|australia)\b", q)
@@ -1292,7 +1302,7 @@ def rule_answer(question: str, options: list[str], kind: str, profile: dict) -> 
                 i = _yes_no(options, False); return _answer("", i, options) if i is not None else None
             return _answer("No")
     # ---- restrictive covenants / non-compete (a fact the candidate confirmed in the profile)
-    if "restrictive_covenant" in profile and re.search(r"restrictive covenant|non-?compete|non-?solicit", q):
+    if "restrictive_covenant" in profile and re.search(r"restrictive covenant|non-?compete|not to compete|non-?solicit", q):
         yes = bool(profile["restrictive_covenant"])
         if has_opts:
             i = _yes_no(options, yes); return _answer("", i, options) if i is not None else None

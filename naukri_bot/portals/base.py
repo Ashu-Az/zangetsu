@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 
 from ..config import Settings
 from ..models import ApplyMode, JobCard, JobPosting
-from ..ranking import eligibility, sort_key, too_old, title_excluded, title_included, company_excluded, dedupe_company_title
+from ..ranking import eligibility, sort_key, too_old, title_excluded, title_included, company_excluded, dedupe_company_title, needs_jd_check, jd_relevant
 from ..tracker import Tracker
 
 from ..humanize import between_applies
@@ -103,7 +103,8 @@ class Portal:
         for i, card in enumerate(fresh, 1):
             if any(k in card.title.lower() for k in extra):
                 tracker.mark_seen(self._tid(card.job_id), "portal_title_filtered"); stats["skipped"] += 1; continue
-            if title_excluded(card.title, self.profile) or not title_included(card.title, self.profile) or company_excluded(card.company, self.profile):
+            jd_check = needs_jd_check(card.title, self.profile) and not company_excluded(card.company, self.profile)
+            if not jd_check and (title_excluded(card.title, self.profile) or not title_included(card.title, self.profile) or company_excluded(card.company, self.profile)):
                 log.info("[%s] title filtered: %s — %s", self.name, card.title[:60], card.company[:25])
                 tracker.mark_seen(self._tid(card.job_id), "title_or_company_filtered"); stats["skipped"] += 1; continue
             if too_old(card.posted, self.settings):
@@ -129,6 +130,11 @@ class Portal:
                 continue
             scrape_failures = 0
             reason = eligibility(job, mode, self.settings, self.profile)
+            if jd_check and not reason:
+                ok, hits = jd_relevant(job, self.profile)
+                log.info("[%s] vague title, JD check: %s — %d skills %s", self.name, job.title[:50], len(hits), hits[:8])
+                if not ok:
+                    reason = f"jd_not_relevant:{len(hits)}_skills"
             if not reason and tracker.role_key(job.company, job.title) in recent_roles:
                 reason = "same_role_applied_recently"
             log.info("[%s] [%d/%d] %-14s appl=%-5s %-12s %s — %s%s", self.name, i, len(fresh), mode.value, job.applicants if job.applicants is not None else "?",

@@ -1395,13 +1395,27 @@ class WorkdayApplier:
         from ..ask_ashu import record
         record(label, options, "workday", getattr(self, 'company', ''))
 
+    def _click_next_safe(self) -> bool:
+        """Click Continue unless the footer button has become Submit (the page already moved to Review while the
+        progress bar still showed the old step). A re-click there submitted Verizon R-1102713 without --submit
+        (15 Nov 2026). Returns False when it refused to click."""
+        try:
+            txt = self.pg.locator(NEXT).first.inner_text(timeout=3000).strip().lower()
+        except Exception:
+            txt = ""
+        if "submit" in txt and not self.submit:
+            log.info("  footer button is Submit: not clicking (submit is off)")
+            return False
+        self._click(NEXT)
+        return True
+
     def _next(self, step_name: str) -> bool:
         pg = self.pg
         if not self._visible(NEXT, timeout=15000):
             self.snapshot("no-continue")
             self.result.status, self.result.notes = "needs_you", f"no Continue button on '{step_name}'"
             return False
-        self._click(NEXT)
+        self._click_next_safe()
         time.sleep(5)
         if re.search(r"something went wrong|please refresh the page", pg.inner_text("body"), re.I):
             log.warning("  Workday error after Continue: refreshing")
@@ -1412,7 +1426,7 @@ class WorkdayApplier:
             self._retried = step_name
             log.info("  still on '%s': filling again before giving up", step_name)
             self._fill_form()
-            self._click(NEXT); time.sleep(5)
+            self._click_next_safe(); time.sleep(5)
         if self.step() == step_name and re.search(r"duplicate website", pg.inner_text("body"), re.I):
             # the account already holds these links from an earlier application: websites are optional, drop the rows
             log.info("  duplicate website URLs: removing the Websites rows and continuing")
@@ -1421,7 +1435,7 @@ class WorkdayApplier:
                 if not dels:
                     break
                 dels[0].click(); time.sleep(1)
-            self._click(NEXT); time.sleep(5)
+            self._click_next_safe(); time.sleep(5)
         if self.step() == step_name:
             self.snapshot("stuck-" + re.sub(r"\W+", "-", step_name.lower())[:30])
             errors = [e.strip() for e in pg.locator(f"{A('errorMessage')}, [role='alert'], [data-automation-id*='error' i] >> visible=true").all_inner_texts() if e.strip()]

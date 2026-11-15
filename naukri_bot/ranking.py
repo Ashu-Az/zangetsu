@@ -154,6 +154,38 @@ def title_excluded(title: str, profile: dict) -> bool:
                for w in profile.get("exclude_title_words", []) or [])
 
 
+# Second layer (Ashu, 15 Nov 2026: "don't search only by title, also check the JD"): startup titles such as
+# "Founding Engineer", "Member of Technical Staff", "Builder" or a bare "Engineer" say little; the JD decides.
+_JD_CHECK_BLOCK = re.compile(r"\b(sales|marketing|hr|recruit\w*|account\w*|finance|valuation|mechanical|civil|electrical|"
+                             r"chemical|biomedical|pharma\w*|clinical|teacher|tutor|nurse|doctor|legal|designer|graphic|"
+                             r"content|seo|customer|support|bpo)\b", re.I)
+
+
+def needs_jd_check(title: str, profile: dict) -> bool:
+    """Title failed title_included but is not a hard exclusion or a clearly non-software role: open the JD
+    and let jd_skill_hits decide instead of dropping it unread."""
+    if not (profile.get("jd_check_vague_titles", True)) or title_excluded(title, profile) or title_included(title, profile):
+        return False
+    return not _JD_CHECK_BLOCK.search(title or "")
+
+
+def jd_skill_hits(job, profile: dict) -> list[str]:
+    """Candidate skills named in the posting (description + key skills + title), whole words only."""
+    text = " ".join([job.title or "", job.description or "", " ".join(job.skills or []), job.role or ""]).lower()
+    hits = []
+    for s in sorted(candidate_skills(profile)):
+        if len(s) < 2:
+            continue
+        if re.search(rf"(?<![a-z0-9]){re.escape(s)}(?![a-z0-9])", text):
+            hits.append(s)
+    return hits
+
+
+def jd_relevant(job, profile: dict) -> tuple[bool, list[str]]:
+    hits = jd_skill_hits(job, profile)
+    return len(hits) >= int(profile.get("jd_min_skill_hits", 3)), hits
+
+
 def company_excluded(company: str, profile: dict) -> bool:
     c = (company or "").lower()
     return any(k.lower() in c for k in profile.get("exclude_companies", []) or [])

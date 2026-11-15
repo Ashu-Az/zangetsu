@@ -28,7 +28,7 @@ from .job_page import detect_apply_mode, scrape_job
 from .llm import LLM
 from .models import ApplyMode, JobPosting
 from .questionnaire import DrawerHandler
-from .ranking import SurveyCache, company_excluded, dedupe_company_title, eligibility, sort_key, title_excluded, title_included, too_old
+from .ranking import SurveyCache, company_excluded, dedupe_company_title, eligibility, sort_key, title_excluded, title_included, too_old, needs_jd_check, jd_relevant
 from .resume_builder import build_resume_files
 from .search import build_search_urls, collect_cards, collect_recommended
 from .tracker import Tracker
@@ -228,7 +228,8 @@ def survey_jobs(b: Browser, cards, settings: Settings, profile: dict, tracker: T
     eligible, skipped = [], 0
     recent_roles = tracker.recent_role_keys()
     for i, card in enumerate(cards, 1):
-        if title_excluded(card.title, profile) or not title_included(card.title, profile):
+        jd_check = needs_jd_check(card.title, profile)
+        if not jd_check and (title_excluded(card.title, profile) or not title_included(card.title, profile)):
             log.info("  [%d/%d] title filtered: %s — %s", i, len(cards), card.title[:60], card.company[:25])
             tracker.mark_seen(card.job_id, "title_filtered")
             skipped += 1
@@ -275,6 +276,11 @@ def survey_jobs(b: Browser, cards, settings: Settings, profile: dict, tracker: T
             survey.put(job, mode)
             pause(1.0, 2.5)
         reason = eligibility(job, mode, settings, profile)
+        if jd_check and not reason:
+            ok, hits = jd_relevant(job, profile)
+            log.info("  [%d/%d] vague title, JD check: %s — %d skills %s", i, len(cards), job.title[:50], len(hits), hits[:8])
+            if not ok:
+                reason = f"jd_not_relevant:{len(hits)}_skills"
         if not reason and Tracker.role_key(job.company, job.title) in recent_roles:
             reason = "same_role_applied_recently"
         if not reason and card.source == "recommended":
